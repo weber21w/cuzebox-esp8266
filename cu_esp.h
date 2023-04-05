@@ -219,8 +219,11 @@ typedef struct{
 #else
 	sint32		host_serial_port;
 #endif
-
-
+	sint8		*host_serial_dev;
+	uint8		host_serial_enabled;
+#ifdef _WINDOWS
+	auint		winsock_enabled;
+#endif
 	uint32		uart_at_mode;//waiting for an AT command, waiting for bytes for an AT+CIPSEND, or waiting some milliseconds to send packet for AT+CIPSENDEX?
 	uint32		uart_at_state;//0 = AT, 1 = binary mode
 	uint8 		baud_bits0,baud_bits1;
@@ -407,7 +410,7 @@ void cu_esp_at_hserial_read(sint8 *cmd_buf); /* should we also support transpare
 
 sint32 cu_esp_host_serial_start(sint8 *dev, auint baud);
 void cu_esp_host_serial_end();
-void cu_esp_host_serial_write();
-auint cu_esp_host_serial_read();
+void cu_esp_host_serial_write(uint8 c);
+uint8 cu_esp_host_serial_read();
 
 #endif

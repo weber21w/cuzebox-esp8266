@@ -106,10 +106,10 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 	}else if(esp_state.user_input_mode == ESP_USER_MODE_SEND){ /* send fixed length mode(prefixed with send command)? */
 		esp_state.remaining_send_bytes--;
 		if(esp_state.remaining_send_bytes == 0){ /* last byte received for a send? */
-			if(1)//cu_esp_send(esp_state.write_buf) == 0)
-				cu_esp_txp((const char*)"SEND OK\r\n");
-			else
-				cu_esp_txp((const char*)"ERROR\r\n");
+		//	if(cu_esp_net_send(esp_state.write_buf) == 0)
+		//		cu_esp_txp((const char*)"SEND OK\r\n");
+		//	else
+		//		cu_esp_txp((const char*)"ERROR\r\n");
 
 			esp_state.user_input_mode = ESP_USER_MODE_AT;	
 		}
@@ -283,9 +283,29 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 }
 
 
+sint32 cu_esp_init_sockets(){
+
+#ifdef _WINDOWS
+	if(!esp_state.winsock_enabled){
+		WSADATA WSAData;
+		if (WSAStartup(MAKEWORD(2,2),&WSAData)){
+			printf("ESP ERROR: Failed for Winsock 2.2 reverting to 1.1\n");
+			if (WSAStartup(MAKEWORD(1,1),&WSAData)){
+				printf("ESP ERROR: Failed on WSAStartup(): %d",cu_esp_get_last_error());
+				return ESP_SOCKET_ERROR;
+			}
+		}
+		esp_state.winsock_enabled = 1;
+	}
+#endif
+
+	cu_esp_reset_network();
+
+	return 0;
+}
 
 void cu_esp_reset_network(){
-
+	cu_esp_init_sockets();
 	for (sint32 i=0;i<4;i++){
 		esp_state.socks[i] = ESP_INVALID_SOCKET;
 		esp_state.proto[i] = ESP_INVALID_SOCKET;
@@ -293,25 +313,7 @@ void cu_esp_reset_network(){
 }
 
 
-sint32 cu_esp_init_sockets(){
 
-#if WINDOWS
-	WSADATA WSAData;
-	if (WSAStartup(MAKEWORD(2,2),&WSAData)){
-		printf("ESP ERROR: Failed for Winsock 2.2 reverting to 1.1\n");
-		if (WSAStartup(MAKEWORD(1,1),&WSAData)){
-			printf("ESP ERROR: Failed on WSAStartup(): %d",cu_esp_get_last_error());
-			return ESP_SOCKET_ERROR;
-		}
-	}
-#elif LINUX
-
-#endif
-
-	cu_esp_reset_network();
-
-	return 0;
-}
 
 
 uint16 cu_esp_checksum(void *b, sint32 len){ /* Standard 1s complement checksum */
@@ -2128,8 +2130,7 @@ void cu_esp_host_serial_end(){
 	
 }
 
-void cu_esp_host_serial_write(){
-
+void cu_esp_host_serial_write(uint8 c){
 
 }
 
