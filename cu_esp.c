@@ -179,7 +179,7 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 
 void cu_esp_uzebox_modify(auint port, auint val, auint cycle){ /* host side has modified UART settings */
 
-printf("\tESP uzebox modify UART, cycle: %d\n", cycle);
+printf("\tESP uzebox modify UART, cycle: %d, port: %d, val: %d\n", cycle, port, val);
 
 	if(port == CU_IO_UCSR0A){ /* UART double speed mode? */
 
@@ -286,7 +286,8 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 sint32 cu_esp_init_sockets(){
 
 #ifdef _WINDOWS
-	if(!esp_state.winsock_enabled){
+	if(!esp_state.winsock_enabled){ /* this only needs to be done once per program run */
+		esp_state.winsock_enabled = 1;
 		WSADATA WSAData;
 		if (WSAStartup(MAKEWORD(2,2),&WSAData)){
 			printf("ESP ERROR: Failed for Winsock 2.2 reverting to 1.1\n");
@@ -295,11 +296,10 @@ sint32 cu_esp_init_sockets(){
 				return ESP_SOCKET_ERROR;
 			}
 		}
-		esp_state.winsock_enabled = 1;
 	}
 #endif
 
-	cu_esp_reset_network();
+//	cu_esp_reset_network();
 
 	return 0;
 }
@@ -1321,26 +1321,24 @@ void cu_esp_at_cipdinfo(sint8 *cmd_buf){
 void cu_esp_at_ping(sint8 *cmd_buf){
 
 /*
-    for (loop=0;loop < 10; loop++)
-    {
-        int len=sizeof(r_addr);
-        if ( recvfrom(sd, &pckt, sizeof(pckt), 0, (struct sockaddr*)&r_addr, &len) > 0 )
-        {
-            return 0;
-        }
-        bzero(&pckt, sizeof(pckt));
-        pckt.hdr.type = ICMP_ECHO;
-        pckt.hdr.un.echo.id = pid;
-        for ( i = 0; i < sizeof(pckt.msg)-1; i++ )
-            pckt.msg[i] = i+'0';
-        pckt.msg[i] = 0;
-        pckt.hdr.un.echo.sequence = cnt++;
-        pckt.hdr.checksum = checksum(&pckt, sizeof(pckt));
-        if ( sendto(sd, &pckt, sizeof(pckt), 0, (struct sockaddr*)addr, sizeof(*addr)) <= 0 )
-            perror("sendto");
-        usleep(300000);
-    }
-    return 1;
+	for(loop=0;loop < 10; loop++){
+		int len=sizeof(r_addr);
+		if ( recvfrom(sd, &pckt, sizeof(pckt), 0, (struct sockaddr*)&r_addr, &len) > 0 ){
+		return;
+	}
+	bzero(&pckt, sizeof(pckt));
+	pckt.hdr.type = ICMP_ECHO;
+	pckt.hdr.un.echo.id = pid;
+	for ( i = 0; i < sizeof(pckt.msg)-1; i++ )
+		pckt.msg[i] = i+'0';
+	pckt.msg[i] = 0;
+	pckt.hdr.un.echo.sequence = cnt++;
+	pckt.hdr.checksum = checksum(&pckt, sizeof(pckt));
+	if ( sendto(sd, &pckt, sizeof(pckt), 0, (struct sockaddr*)addr, sizeof(*addr)) <= 0 )
+		printf("ESP ERROR: ping sendto() failed: %d\n", cu_esp_get_last_error());
+		usleep(300000);
+	}
+	return 1;
 */
 }
 
@@ -1697,7 +1695,7 @@ esp_state.rx_packet[0] = '\0';
 /********************************/
 
 void cu_esp_save_config(){
-return; 
+
 	esp_state.flash_dirty = 0;
 
 	FILE *f = fopen("esp.cfg","w");
@@ -1782,6 +1780,7 @@ auint cu_esp_load_config(){
 /********************************/
 
 sint32 cu_esp_net_connect(sint8 *hostname, uint32 sock, uint32 port, uint32 type){
+
 //port = 80;
 printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, sock, port, (type == ESP_PROTO_TCP ? "TCP":"UDP"));
 	/* do things the modern non-depreciated way, now supporting IPv6! */
@@ -2031,6 +2030,7 @@ void cu_esp_txp_ok(){ cu_esp_txp((const char*)"OK\r\n"); }
 
 
 sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
+
 #ifdef _WINDOWS
 	esp_state.host_serial_port = CreateFileA(dev, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (esp_state.host_serial_port == INVALID_HANDLE_VALUE){
@@ -2076,12 +2076,12 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 	}
 #else
 	auint original_baud = baud;
-	switch(baud){ /* have to convert to a defined constant */
+	switch(baud){ //have to convert to a defined constant
 		case 2400: baud = B2400; break;
 		case 4800: baud = B4800; break;
 		case 9600: baud = B9600; break;
 		case 19200: baud = B19200; break;
-		case 38400: baud = B38400; break;/* all after this are not POSIX?! */
+		case 38400: baud = B38400; break;// all after this are not POSIX?! 
 		case 57600: baud = B57600; break;
 		case 115200: baud = B115200; break;
 		case 230400: baud = B230400; break;
@@ -2109,8 +2109,8 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 	port_settings.c_iflag = IGNPAR;
 	port_settings.c_oflag = 0;
 	port_settings.c_lflag = 0;
-	port_settings.c_cc[VMIN] = 0;      /* block untill n bytes are received */
-	port_settings.c_cc[VTIME] = 0;     /* block untill a timer expires (n * 100 mSec.) */	
+	port_settings.c_cc[VMIN] = 0;      // block untill n bytes are received
+	port_settings.c_cc[VTIME] = 0;     // block untill a timer expires (n * 100 mSec.)	
 	cfsetispeed(&port_settings, B115200);
 
 	esp_state.host_serial_port = open((char *)dev, O_RDWR | O_NOCTTY | O_NDELAY);
@@ -2121,7 +2121,9 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 	}
 	baud = original_baud;
 #endif
+
 	printf("ESP Host Serial initialized: %s @ %d\n", dev, original_baud);
+
 	return 0;
 }
 
