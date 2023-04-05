@@ -2134,7 +2134,7 @@ void cu_esp_host_serial_write(uint8 c){
 
 }
 
-auint cu_esp_host_serial_read(){
+uint8 cu_esp_host_serial_read(){
 
 	return 0;
 }
