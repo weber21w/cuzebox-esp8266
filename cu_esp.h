@@ -207,6 +207,13 @@ typedef struct{
 	sint32		socks[5];
 	auint		proto[5];
 
+	auint		delay_pos[8];//the position in read_buf[] that is stalled on, until the timer expires
+	auint		delay_len[8];//the length of each stall, combined with position, lets us write out combinations of transmission and delays
+
+	auint		last_cycle_tick;
+	auint		ip_delay_timer;//the cycle delay until "WIFI GOT IP\r\n"
+	auint		join_delay_timer;//the cycle delay until ""
+
 	auint		uart_ucsr0a, uart_ucsr0b, uart_ucsr0c, uart_ubrr0l, uart_ubrr0h, uart_scramble;
 	uint8		uart_double_speed, uart_synchronous, uart_data_bits, uart_rx_enabled, uart_tx_enabled;
 	uint8		uart_parity, uart_stop_bits;
@@ -326,9 +333,11 @@ void cu_esp_reset_uart();
 void  cu_esp_update(void);
 void  cu_esp_txi(sint32 i);
 void  cu_esp_txp(const char *s);
+void cu_esp_txl(const char *s, auint len);
 void  cu_esp_txp_ok();
 void  cu_esp_txp_error();
-void  cu_esp_timed_stall(uint32 cycles);
+void  cu_esp_timed_stall(auint cycles);
+auint cu_esp_update_timer_counts(auint cycle);
 sint32  cu_esp_process_ipd();
 void  cu_esp_save_config();
 auint  cu_esp_load_config();

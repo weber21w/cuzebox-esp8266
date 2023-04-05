@@ -128,15 +128,74 @@ printf("AT: %d\n", esp_state.write_buf_pos_in);
 	}
 }
 
+
+auint cu_esp_update_timer_counts(auint cycle){
+
+
+	uint8 i;
+	auint tdelta;
+	auint earliest = cycle;//earliest time another bytes by can be transmitted, based on all delay timers
+	if(cycle > esp_state.last_cycle_tick)
+		tdelta = WRAP32(cycle - esp_state.last_cycle_tick);
+	else
+		tdelta = WRAP32(esp_state.last_cycle_tick - cycle);
+
+	if(esp_state.ip_delay_timer){ /* process timer for getting an IP after joining an AP */
+		if(esp_state.ip_delay_timer <= tdelta){
+			esp_state.ip_delay_timer = 0;
+			cu_esp_txp((const char *)"WIFI GOT IP\r\n");
+		}else
+			esp_state.ip_delay_timer -= tdelta;
+	}
+
+	if(esp_state.join_delay_timer){ /* process timer between the command to connect to an AP, and the actual completed action */
+		if(esp_state.join_delay_timer <= tdelta){
+			esp_state.join_delay_timer = 0;
+			char ap_buffer[64+64];
+			sprintf(ap_buffer,"+CWJAP:%s\r\nOK\r\n",esp_state.wifi_name);
+			cu_esp_txp(ap_buffer);
+		}else
+			esp_state.join_delay_timer -= tdelta;
+	}
+return esp_state.read_buf_pos_out;
+///////////////////////////////////////////////
+
+
+
+	for(i=0; i<sizeof(esp_state.delay_pos); i++){ /* check each delay slot, and see if the timer needs to be updated */
+		if(!esp_state.delay_len[i])
+			continue;
+
+
+		if(esp_state.delay_len[i] <= tdelta){
+			esp_state.delay_len[i] = 0;
+			continue;
+		}
+		/* see if this timer is preventing further UART data to be transferred */
+		esp_state.delay_len[i] -= tdelta;
+		
+	}
+	esp_state.last_cycle_tick = cycle;/* keep track of the last tick cycle for timing logic */
+
+	return earliest;
+}
+
+
 auint cu_esp_uzebox_read_ready(auint cycle){ /* host side checking if a byte has been received */
 
 	if(cycle >= esp_state.read_ready_cycle){
 		esp_state.read_ready_cycle = 0UL;
 
-		if(esp_state.read_buf_pos_in != esp_state.read_buf_pos_out){
+		auint buf_next = cu_esp_update_timer_counts(cycle);/* based on timing, get the max position we can send from */
 
-	//		printf("read ready\n");
-			return (1<<RXC0);
+		if(esp_state.read_buf_pos_in != esp_state.read_buf_pos_out){ /* data is available? */
+
+			if(buf_next == esp_state.read_buf_pos_out) /* no timer delays prevent this data being sent yet? */
+				return (1<<RXC0);
+			else{
+				printf("<<<<STALL>>>>\n");
+				return 0; /* some timer is preventing further output, it likely pre-queued a delayed message that is not to be sent yet */
+			}
 		}else if(esp_state.state & ESP_INTERNET_ACCESS){ /* no data queued, see if there is new net data received that we should send now(otherwise let it buffer until Uzebox checks) */
 
 			if(cu_esp_process_ipd() > 0){
@@ -153,7 +212,7 @@ auint cu_esp_uzebox_read_ready(auint cycle){ /* host side checking if a byte has
 auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a UART byte */
 
 	if(esp_state.read_buf_pos_out == esp_state.read_buf_pos_in){ /* no new data? return the last byte sent */
-		printf("read, but no data is buffered\n");
+		printf("ESP UART: Uzebox read, but no data is buffered\n");
 		return esp_state.last_read_byte;
 	}
 
@@ -529,10 +588,10 @@ printf("ESP Starting Transparent Transmission\n");
 
 
 void cu_esp_at_cwjap(sint8 *cmd_buf){ /* Join a wifi access point, fake, this could use the host hardware to be real */
-		
+printf("ESP Join AP\n");
 	uint8 at_error = 0;
 	sint32 i;
-	if (strncmp("?\r\n",(const char *)&cmd_buf[8],3)){ /* Query only */
+	if (0 && strncmp("?\r\n",(const char *)&cmd_buf[8],3)){ /* Query only */
 
 		if (esp_state.state & ESP_AP_CONNECTED){
 			char ap_buffer[64+64];
@@ -544,7 +603,10 @@ printf("jap failed?!?");
 		}
 
 	}else{ /* Check the credentials against the fake APs */
+/* need to send "WIFI GOT IP" */
 		/* TODO HACK */
+
+		cu_esp_txp((const char *)"WIFI GOT IP\r\n");
 		cu_esp_timed_stall(ESP_AT_CWJAP_DELAY);
 		cu_esp_txp_ok();
 		return;
@@ -1666,7 +1728,7 @@ esp_state.rx_packet[0] = '\0';
 //printf("RECEIVED SOME DATA[%s] %d bytes\n", esp_state.rx_packet, num_bytes);
 		if(esp_state.user_input_mode == ESP_USER_MODE_UNVARNISHED){
 	//		printf("Got unvarnished:[%s]\n",esp_state.rx_packet);
-			cu_esp_txp((const char *)esp_state.rx_packet);
+			cu_esp_txl((const char *)esp_state.rx_packet, num_bytes);
 		}
 			
 	} /* for */
@@ -1981,7 +2043,7 @@ void cu_esp_net_send_unvarnished(sint8 *buf, auint len){
 
 
 void cu_esp_timed_stall(auint cycles){ /* TODO make this work the new way...*/
-return;
+	
 
 }
 
@@ -2000,7 +2062,7 @@ void cu_esp_reset_uart(){
 }
 
 
-void cu_esp_txp(const char *s){ /* Write const string to tx bufESP_FACTORY_DEFAULT_BAUD_BITSfer(eventually makes it to Uzebox rx) */
+void cu_esp_txp(const char *s){ /* Write const string to tx buf */
 
 	auint slen = strlen(s);
 	if((esp_state.read_buf_pos_in < esp_state.read_buf_pos_out) && ((esp_state.read_buf_pos_in + slen) >= esp_state.read_buf_pos_out)){ /* this string will fill the buffer? */
@@ -2017,6 +2079,25 @@ void cu_esp_txp(const char *s){ /* Write const string to tx bufESP_FACTORY_DEFAU
 	}
 	strcpy((char *)esp_state.read_buf+esp_state.read_buf_pos_in, s);
 	esp_state.read_buf_pos_in += slen;
+}
+
+void cu_esp_txl(const char *s, auint len){ /* write fixed length to tx buf */
+
+	if((esp_state.read_buf_pos_in < esp_state.read_buf_pos_out) && ((esp_state.read_buf_pos_in + len) >= esp_state.read_buf_pos_out)){ /* this data will fill the buffer? */
+		printf("<<<<BUFFER OVERFLOW>>>>\n");
+		esp_state.read_buf_pos_in = esp_state.read_buf_pos_out = 0UL; /* real device is unpredictable is you spam it, we just trash the buffer and send error instead of trying to model that inner state... */
+		cu_esp_txp_error();
+		return;
+	}
+	if((esp_state.read_buf_pos_in + len) >= sizeof(esp_state.read_buf)){ /* have to split across the end/beginning of the circular buffer? */
+		strncpy((char *)esp_state.read_buf+esp_state.read_buf_pos_in, s, (sizeof(esp_state.read_buf)-(esp_state.read_buf_pos_in+1)));
+		len -= (sizeof(esp_state.read_buf)-(esp_state.read_buf_pos_in+1));
+		esp_state.read_buf_pos_in = 0;
+		cu_esp_txl(s+len, len);//recursion to handle the remaining string(to recheck if we will overfill the buffer)
+		return;
+	}
+	memcpy((char *)esp_state.read_buf+esp_state.read_buf_pos_in, s, len);
+	esp_state.read_buf_pos_in += len;
 }
 
 void cu_esp_txi(sint32 i){
