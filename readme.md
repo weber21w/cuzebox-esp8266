@@ -1,52 +1,209 @@
-# Disk images
 
-The content of this folder contains disk images in standard 8" SSSD (single sided single density) CP/M v2.2 images. The specs of the disk images are the following: Tracks: 77, Sectors per track: 26, Sector lenght: 128, Blocksize: 1024, Max directory entries: 64, Skew: 6, Boot tracks: 2.
+CUzebox emulator
+==============================================================================
 
-The provided file named DISK.CFG must be on the SD card in order to describes the mapping between drives numbers and images files. Up to four drives are supported by CP/M named A:, B:, C: and D:. By default the four images files are:
- * A:CPMDISK0.DSK  
- * B:CPMDISK1.DSK  
- * C:CPMDISK2.DSK  
- * D:MULTIPLN.DSK 
+:Author:    Sandor Zsuga (Jubatian)
+:License:   GNU GPLv3 (version 3 of the GNU General Public License)
 
-# Images provided
 
-* ADVENT.DSK  : Microsoft's Adventure text based game.
-* CPM22.DSK   : Original CP/M 2.2 boot disk with utilities.
-* CPMDISK0.DSK: Boot disk with programs and utilities.
-* CPMDISK1.DSK: Games Zork, Chess and Hitchhicker's guide to the galaxy.
-* CPMDISK2.DSK: Microsoft Basic 5.21 and some basic programs.
-* INFOCOM1.DSK: Infocom classic games disk 1.
-* INFOCOM2.DSK: Infocom classic games disk 2.
-* INFOCOM3.DSK: Infocom classic games disk 3.
-* MULTIPLN.DSK: Microsoft Multiplan 1.06 VT100. An example spreadsheet is provided. Start with: MP BUDGET.MP
-* WM.DSK	  : Word-Master word processor.
-* WSTAR33.SDK : WordStar 3.3 word processor.
 
-# Editing disk images
 
-The followings tool are able to read/write to and from those CP/M disk images.
+Overview
+------------------------------------------------------------------------------
 
-## CPMFS
 
-See: https://www.sydneysmith.com/wordpress/cpmfs/
-(A copy is under tools/cpmfs)
+This is a currently experimental emulator for the Uzebox game console written
+entirely in C, using SDL 2.
 
-Note that only SSSD images types are supported (-t LGSSSD).
+It can be compiled with Emscripten as well for providing games embedded in web
+sites. For games it supports it works better than the Uzem emulator.
 
-Examples:
-* Create a new disk image
-	`cpmfs -t LGSSSD MYDISK.DSK init`
-* List files on an image: 
-	`cpmfs CPMDISK0.DSK dir`
-* Extract a file from the image to the local drive: 
-	`cpmfs CPMDISK0.DSK r TELNET.DAT`
-* Write a file to an image: 
-	`cpmfs CPMDISK0.DSK w TELNET.DAT`
+For building, use the Make_config.mk file to specify target platform.
+Currently it should build for Linux and Emscripten, and Windows as cross
+compile target using mingw32-gcc (I can not test native compiles for that
+platform since I don't have the OS).
 
-## CPMTOOLS 
 
-http://cpmarchives.classiccmp.org/cpm/mirrors/www.cpm8680.com/cpmtools/index.htm
 
-* List files on an image: 
-	`cpmls -f ibm-3740 cpmdisk2.dsk`
 
+Controls
+------------------------------------------------------------------------------
+
+
+On the keybouard, you can control Player 1's SNES controller as follows:
+
+- Arrow keys: D-Pad
+- Q: Button Y
+- W: Button X
+- A: Button B
+- S: Button A
+- Enter: Start
+- Space: Select
+- Left shift: Left shoulder
+- Right shift: Right shoulder
+
+The emulator itself can be controlled with the following keys:
+
+- ESC: Exit
+- F1: Toggle keyboard dongle emulation*
+- F2: Toggle low quality display (faster, but blurry and ugly)
+- F3: Toggle debug informations (slightly faster with them off)
+- F4: Toggle frame rate limiter
+- F5: Toggle video capture (only if compiled in)
+- F6: Cycle through mouse scaling (cycle to the end to disable, again to enable)
+- F7: Toggle frame merging (slower, eliminates flicker in some games)
+- F8: Toggle keymap between SNES and UZEM (Default: SNES)
+- F9: Pause / Unpause
+- F10: Advance a single frame
+- F11: Toggle full screen
+- F12: Toggle between 1 player and 2 player controller allocation
+
+You can direct keyboard input to Player 2's SNES controller by holding down
+either ALT key. When the keyboard dongle emulation is active(and a game request
+it), all keyboard input is passed to the program. See notes below for details.
+
+The UZEM keymap maps the buttons of the SNES controller according to the Uzem
+emulator with the addition that 'Y' also triggers an SNES Y button press (so
+the mapping is useful on a QWERTZ keyboard). It is not recommended for
+developing games with complex controls since its layout differs much to the
+layout of the real controller.
+
+If you have two (physical) game controllers, the emulator will start with two
+player controller allocation (so one of the controllers belong to Player 1,
+the other to Player 2), otherwise it will start with one player (both the
+keyboard and a single game controller will belong to Player 1). The keyboard
+always belongs to Player 1.
+
+If you want to see how fast the AVR core can possibly run, turn off debug
+informations and use a small display while the frame rate limiter is off. On
+computers where the AVR core can actually run very fast this will still have
+some rendering (and notably blit to screen) overhead (since the frames are
+still fully rendered even then).
+
+The Emscripten build can be maximized to full screen with the browser's full
+screen option.
+
+
+
+
+Emulated components
+------------------------------------------------------------------------------
+
+
+Currently the following features are implemented:
+
+- AVR core with cycle perfect emulation.
+- Core AVR peripherals as necessary to run Uzebox games.
+- Sound and video output (frame rate synchronized to host if possible).
+- SNES controllers (keyboard for Player 1, game controllers for both).
+- EEPROM including saving its contents alongside the emulated game.
+- SPM instruction and related elements necessary for bootloader emulation.
+- SD Card read and write (writing didn't see much testing yet).
+- SPI RAM.
+
+Currently lacking but planned:
+
+- Emulator state saves (snapshots).
+- Mouse (Uzebox's SNES mouse).
+- Networking features as provided by the ESP8266 over the UART.
+
+Notes:
+
+The SD card emulation is fairly capable, it has several compile time
+constants in the cu_spisd.c file which you may adjust. You can set them to
+emulate a strict SD card breaking several existing games, but which can help
+you developing more robust SD code.
+
+The SD write feature is sandboxed within the directory of the game. It doesn't
+emulate subdirectories. You may only override existing file contents, expand
+files or create new ones, it should be capable to track these operations if
+you write the FAT first.
+
+A bootloader can be started simply by passing the bootloader's .hex file as
+parameter to the emulator. The virtual SD card is composed from the files
+existing in the same directory. Note that the emulator can not remember what
+the bootloader wrote last time into the flash. (So you can not start the last
+selected game with the 0.4.5 bootloader as it recognizes the game by a CRC
+written in EEPROM, not by flash content. The 5.x.yy bootloaders work fine)
+
+In ROMs that trigger the keyboard dongle activation, it will automatically
+start. This will in turn capture all keyboard input (to the ROM), and you
+will no longer be able to use emulator hotkeys. To disable this "passthrough"
+mode, use Ctrl+F1. This is similar to unplugging the dongle from Uzebox. You
+can re-enable it at any time by pressing F1.
+
+In ROMs that utilize the mouse, you may use F6 to cycle through various scaling.
+If you cycle all the way to the end, it will disable the mouse, which can be
+re-enabled by pressing F6 again. If keyboard dongle "passthrough" mode is active
+you will need to use Ctrl+F6 to modify mouse settings. This allows use of  mouse,
+or not, keyboard dongle, or not, or both. The emulated mouse will always use P1
+and the emulated keyboard dongle will always use P2. This will bypass the gamepads
+for that port. You can disable either peripheral and it will automatically allow
+gamepad data again for the corresponding port.
+
+
+Emscripten notes
+------------------------------------------------------------------------------
+
+
+After setting up Emscripten so it is capable to compile examples, at least on
+Linux compiling the emulator should require the following steps:
+
+- In "Make_config.mk", adjust the target (TSYS) to "emscripten".
+- Copy a game renamed as "gamefile.uze" in the source tree.
+- Run "Make".
+
+The game can also be a .hex file (but needs to be renamed to "gamefile.uze").
+This game will be added to the build's virtual filesystem.
+
+A "cuzebox_minimal.html" file is also provided to demonstrate the Emscripten
+build, which contains the bare necessities to start the compiled emulator in a
+browser.
+
+To get the minimal size for your build, you can set the following flags in
+"Make_config.mk":
+
+- FLAG_NOCONSOLE: This removes all console output. Normally console output
+  shouldn't be really necessary (but test whether the game can be loaded all
+  right first with a native compile or an Emscripten build with console
+  output on).
+
+- FLAG_SELFCONT: Integrates the game within the emulator. This removes the
+  Emscripten virtual filesystem saving more than 100 KBytes, but it is only
+  capable to work with games which don't need the SD card.
+
+A compiled game needs the "cuzebox.js", the "cuzebox.html.mem" and either the
+"cuzebox.html" or "cuzebox_minimal.html" files to function. It also needs
+"cuzebox.data" if it was built with FLAG_SELFCONT set zero (default).
+
+
+
+
+Video capture
+------------------------------------------------------------------------------
+
+
+By default the video capture feature is not compiled in. You can enable it in
+Make_config.mk.
+
+To use it, you need ffmpeg installed with mp3lame for audio and H.264 for
+video.
+
+You can toggle capturing with F5 during running the emulation: you may use it
+multiple times to capture only sections of a session. During this phase the
+emulator will write out large uncompressed video to allow running reasonably
+well.
+
+The video capture is independent of the frame rate management: you will get
+perfect continuous 60 FPS video even if the emulator slows down or skips
+frames due to being unable to keep up with the task.
+
+When you exit the emulator, it will launch a slow video encoding step when it
+produces proper 720p H.264 video from the material it recorded.
+
+Note that the state of frame merging (F7) notably affects the performance of
+video captures and the output size. Having it on results in larger video
+sizes, slower encoding, and worse emulation performance. It should be turned
+off for games which don't need it, but should be kept on where necessary (if
+the game in question uses some type of sprite rotation or effect based on
+rapidly alternating between two images).
