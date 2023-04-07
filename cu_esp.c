@@ -30,9 +30,11 @@
 #include "cu_esp.h"
 #include "cu_types.h"
 
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 #include <windows.h>
 	#include <winsock2.h>
+	#include <ws2tcpip.h>
+	#pragma comment (lib, "Ws2_32.lib")
 #else /* POSIX system(Linux, OSX, etc) */
 #include <stdio.h>
 #include <sys/socket.h> //For Sockets
@@ -344,7 +346,7 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 
 sint32 cu_esp_init_sockets(){
 
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	if(!esp_state.winsock_enabled){ /* this only needs to be done once per program run */
 		esp_state.winsock_enabled = 1;
 		WSADATA WSAData;
@@ -948,10 +950,11 @@ TODO*/
 		return;
 	}
 
-		auint block_mode = 1;
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	u_long block_mode = 1;
 	if (ioctlsocket(esp_state.socks[sock],FIONBIO,&block_mode)){
 #else
+	auint block_mode = 1;
 	if (ioctl(esp_state.socks[sock],FIONBIO,&block_mode)){
 /* is this better? fcntl(server_socket, F_SETFL, O_NONBLOCK); */
 /*	int ssoe = setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (void *)&enable, sizeof(enable));//allow addr reuse */
@@ -1861,7 +1864,7 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 	if(r == 1){ /* IPv4 address? */
 		ahints.ai_family = AF_INET;
 		ahints.ai_flags |= AI_NUMERICHOST;
-	}else{
+	}else{ /* prefer IPv6 */
 		r = inet_pton(AF_INET6, (char *)hostname, &host_addr);
 		if(r == 1){ /* IPv6 address? */
        
@@ -1874,7 +1877,7 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 	if(rc != 0){
 
 		printf("ESP ERROR: can't find host [%s]: %d\n", (char *)hostname, (int)cu_esp_get_last_error());
-		if(rc == EAI_SYSTEM)
+		if(rc != EAI_AGAIN)
 			printf("ESP ERROR: getaddrinfo() failed: %d\n", (int)cu_esp_get_last_error());
 		return -1;
 	}
@@ -1924,7 +1927,7 @@ printf("SOCKET: %d\n", esp_state.socks[sock]);
 */
 
 /*
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	if ( (connect(esp_state.socks[sock],(LPSOCKADDR)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == ESP_SOCKET_ERROR){
 #else
 	if ( (connect(esp_state.socks[sock],(struct sockaddr *)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == ESP_SOCKET_ERROR){
@@ -1940,15 +1943,16 @@ printf("SOCKET: %d\n", esp_state.socks[sock]);
 	}
 */
 	auint block_mode = 1;
-#ifdef _WINDOWS
-	if (ioctlsocket(esp_state.socks[sock],FIONBIO,&block_mode) != 0){ printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); return ESP_INVALID_SOCKET; }
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	if (ioctlsocket(esp_state.socks[sock],FIONBIO,(u_long *)&block_mode) != 0){ printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); return ESP_INVALID_SOCKET; }
 #else
 	if (ioctl(esp_state.socks[sock],FIONBIO,&block_mode) != 0){ printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); return ESP_INVALID_SOCKET;  }
-#endif
-	sint8 optval = 1;
-	int optlen = sizeof(sint8);
+
+//	sint8 optval = 1;
+//	int optlen = sizeof(sint8);
 	/* disable Nagles Algorithm */
 //	if(setsockopt(esp_state.socks[sock],IPPROTO_TCP,TCP_NODELAY,(char *)&optval,optlen) != 0){ printf("ESP ERROR: failed to set socket option TCP_NODELAY\n"); return ESP_INVALID_SOCKET; }
+#endif
 	printf("ESP Connected to [%s] on connection: %d\n", hostname, sock);
 	return 0;
 }
@@ -1976,7 +1980,7 @@ void cu_esp_close_socket(uint32 sock){
 
 	if (sock != ESP_ALL_CONNECTIONS){
 
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	closesocket(esp_state.socks[sock]);
 #else
 	close(esp_state.socks[sock]);
@@ -1986,7 +1990,7 @@ void cu_esp_close_socket(uint32 sock){
 	}else{ /* Close all connections */
 
 		for (uint32 i=0;i<4;i++){
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 			closesocket(esp_state.socks[i]);
 #else
 			close(esp_state.socks[i]);
@@ -1998,7 +2002,7 @@ void cu_esp_close_socket(uint32 sock){
 }
 
 sint32 cu_esp_get_last_error(){
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	return WSAGetLastError();
 #else
 	return errno;
@@ -2007,7 +2011,7 @@ sint32 cu_esp_get_last_error(){
 
 
 
-sint32 cu_esp_net_send(uint32 sock, uint8 *buf, sint32 len, sint32 flags){
+sint32 cu_esp_net_send(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 //buf[len] = '\0';
 
 //printf("SEND() sock: %d, buf[%s], len: %d, flags: %d\n", sock, buf, len, flags);
@@ -2017,7 +2021,7 @@ sint32 cu_esp_net_send(uint32 sock, uint8 *buf, sint32 len, sint32 flags){
 
 
 
-sint32  cu_esp_net_recv(uint32 sock, uint8 *buf, sint32 len, sint32 flags){
+sint32  cu_esp_net_recv(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 /* TODO HANDLE UDP */
 
 	return recv(esp_state.socks[sock], buf, sizeof(esp_state.rx_packet), 0);
@@ -2044,7 +2048,19 @@ void cu_esp_net_send_unvarnished(sint8 *buf, auint len){
 
 void cu_esp_timed_stall(auint cycles){ /* TODO make this work the new way...*/
 	
+	uint8 i;
+	for(i=0; i<sizeof(esp_state.delay_pos); i++){ /* find open delay slot */
+		if(!esp_state.delay_len[i])
+			break;
+	}
 
+	if(i == sizeof(esp_state.delay_pos)){ /* no open slots for delays? shouldn't happen, not much can be done... */
+		cu_esp_txp_error();
+		cu_esp_at_txp_bad_command();
+	}
+
+	esp_state.delay_len[i] = cycles;
+	esp_state.delay_pos[i] = esp_state.read_buf_pos_in; /* Uzebox can still read previously buffered data before this point in time */
 }
 
 
@@ -2112,32 +2128,33 @@ void cu_esp_txp_ok(){ cu_esp_txp((const char*)"OK\r\n"); }
 
 sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 
-#ifdef _WINDOWS
-	esp_state.host_serial_port = CreateFileA(dev, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	auint original_baud = baud;
+
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	esp_state.host_serial_port = CreateFileA((LPCSTR)dev, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (esp_state.host_serial_port == INVALID_HANDLE_VALUE){
-		printf("ESP ERROR: Host Serial CreateFileA() failed: %d\n", GetLastError());
+		printf("ESP ERROR: Host Serial CreateFileA() failed: %u\n", (unsigned int)GetLastError());
 		return ESP_SERIAL_OPEN_ERROR;
 	}
 
 	// Flush away any bytes previously read or written.
-	BOOL success = FlushFileBuffers(port);
+	BOOL success = FlushFileBuffers(esp_state.host_serial_port);
 	if (!success){
-		printf("ESP ERROR: Host Serial FlushFileBuffers() failed: %d\n", GetLastError());
+		printf("ESP ERROR: Host Serial FlushFileBuffers() failed: %d\n", (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
 
-	// Configure read and write operations to time out after 100 ms.
 	COMMTIMEOUTS timeouts = {0};
-	timeouts.ReadIntervalTimeout = 0;
-	timeouts.ReadTotalTimeoutConstant = 100;
+	timeouts.ReadIntervalTimeout = MAXDWORD; /* this is important for non-blocking without overlapped io */
+	timeouts.ReadTotalTimeoutConstant = 0;
 	timeouts.ReadTotalTimeoutMultiplier = 0;
-	timeouts.WriteTotalTimeoutConstant = 100;
+	timeouts.WriteTotalTimeoutConstant = 0;
 	timeouts.WriteTotalTimeoutMultiplier = 0;
 
 	success = SetCommTimeouts(esp_state.host_serial_port, &timeouts);
 	if (!success){
-		print_error("ESP ERROR: Host Serial SetCommTimeouts(): %d\n", GetLastError());
+		print_error("ESP ERROR: Host Serial SetCommTimeouts(): %d\n", (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
@@ -2151,12 +2168,11 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 	state.StopBits = ONESTOPBIT;
 	success = SetCommState(esp_state.host_serial_port, &state);
 	if (!success){
-		printf("ESP ERROR: Host Serial SetCommState() failed: %d\n", GetLastError());
+		printf("ESP ERROR: Host Serial SetCommState() failed: %d\n", (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
 #else
-	auint original_baud = baud;
 	switch(baud){ //have to convert to a defined constant
 		case 2400: baud = B2400; break;
 		case 4800: baud = B4800; break;
@@ -2180,7 +2196,7 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 		case 4000000: baud = B4000000; break;
 		default:
 			printf("ESP ERROR: Host Serial baud conversion failed, [%d] is not supported\n", original_baud);
-			return -1;
+			return ESP_SERIAL_OPEN_ERROR;
 			break;
 	}
 
@@ -2198,7 +2214,7 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 
 	if(esp_state.host_serial_port == -1){
 		printf("ESP ERROR: Host Serial open() failed: %d\n", (int)cu_esp_get_last_error());
-		return -1;
+		return ESP_SERIAL_OPEN_ERROR;
 	}
 	baud = original_baud;
 #endif
@@ -2214,10 +2230,31 @@ void cu_esp_host_serial_end(){
 }
 
 void cu_esp_host_serial_write(uint8 c){
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	DWORD written;
+	BOOL success = WriteFile(serial_port, buffer, size, &written, NULL);
 
+	if(!success || written != 1)
+		printf("ESP ERROR: failed to write host serial byte\n");
+#else
+	ssize_t r = write(esp_state.host_serial_port, &c, 1);
+	if(r != 1){
+		printf("ESP ERROR: failed to write host serial byte\n");
+	}
+#endif
 }
 
 uint8 cu_esp_host_serial_read(){
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	DWORD received;
+	BOOL success = ReadFile(serial_port, buffer, 1, &received, NULL);
+	if (!success){
+		printf("Failed to read from port");
+		return 0;
+	}
+#else
 
+#endif
+	//return received;
 	return 0;
 }

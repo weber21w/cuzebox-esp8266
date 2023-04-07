@@ -34,7 +34,7 @@
 #include "types.h"
 //#include <stdio.h>
 
-#ifdef _WIN32
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	#include <winsock2.h>
 #else /* POSIX system(Linux, OSX, etc) */
 	#include <sys/socket.h>
@@ -91,11 +91,11 @@
 #define ESP_BIN_SEND			4
 #define ESP_BIN_SEND_BIG		5//16 bit payload length specifer
 
-#ifdef _WINDOWS
-#define ESP_SERIAL_OPEN_ERROR		INVALID_HANDLE_VALUE
-#else
+//#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+//#define ESP_SERIAL_OPEN_ERROR		INVALID_HANDLE_VALUE
+//#else
 #define ESP_SERIAL_OPEN_ERROR		-1
-#endif
+//#endif
 
 #define ESP_UART_AWAITING_COMMAND		4096
 #define ESP_UART_AWAITING_TIME			8192
@@ -170,7 +170,7 @@ typedef struct{
 
 	uint32		active_socket;//the current socket for send operations, stored after send commands while we await the payload
 	
-	uint8		rx_packet[16UL*1024UL];//buffer for received network packets
+	sint8		rx_packet[16UL*1024UL];//buffer for received network packets
 	uint32		rx_packet_bytes;//how many bytes are left in the packet
 	uint8		reset_pin;
 	uint8		reset_pin_prev;
@@ -221,14 +221,14 @@ typedef struct{
 	auint		uart_baud_bits_module; /* the equivalent for the module's current speed(which may be different than the 644) */
 
 	auint		uart_baud_bits_module_default; /* the value to use after a module reset */
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	HANDLE		host_serial_port;
 #else
 	sint32		host_serial_port;
 #endif
 	sint8		*host_serial_dev;
 	uint8		host_serial_enabled;
-#ifdef _WINDOWS
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	auint		winsock_enabled;
 #endif
 	uint32		uart_at_mode;//waiting for an AT command, waiting for bytes for an AT+CIPSEND, or waiting some milliseconds to send packet for AT+CIPSENDEX?
@@ -321,8 +321,8 @@ void  cu_esp_external_write(uint8 val); /* write to a real serial device on the 
 void  cu_esp_external_read();
 auint cu_esp_net_last_error();
 sint32  cu_esp_net_connect(sint8 *hostname, uint32 sock, uint32 port, uint32 type);
-sint32  cu_esp_net_send(uint32 sock, uint8 *buf, sint32 len, sint32 flags);
-sint32  cu_esp_net_recv(uint32 sock, uint8 *buf, sint32 len, sint32 flags);
+sint32  cu_esp_net_send(uint32 sock, sint8 *buf, sint32 len, sint32 flags);
+sint32  cu_esp_net_recv(uint32 sock, sint8 *buf, sint32 len, sint32 flags);
 void cu_esp_net_send_unvarnished(sint8 *buf, auint len);
 auint cu_esp_atoi(char *str);
 sint32 cu_esp_get_last_error();
@@ -336,6 +336,7 @@ void  cu_esp_txp(const char *s);
 void cu_esp_txl(const char *s, auint len);
 void  cu_esp_txp_ok();
 void  cu_esp_txp_error();
+void  cu_esp_at_txp_bad_command();
 void  cu_esp_timed_stall(auint cycles);
 auint cu_esp_update_timer_counts(auint cycle);
 sint32  cu_esp_process_ipd();
