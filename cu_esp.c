@@ -81,6 +81,9 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 	if(!esp_state.uart_tx_enabled)
 		return;
 
+	//if(esp_state.uart_scramble) /* wrong UART settings? scramble the data(not modeling the nearly analog nature of real framing errors...) */
+	///	val = ((val * val) & 0b01010101);
+
 	if((esp_state.state & ESP_ECHO) && esp_state.user_input_mode < ESP_USER_MODE_UNVARNISHED){ /* should we echo the byte back? */
 		cu_esp_txp((const char *)&val);
 //printf("ECHO [(const char *)&val]\n");
@@ -89,6 +92,8 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 	if(esp_state.user_input_mode == ESP_USER_MODE_UNVARNISHED){ /* sending time window mode? */
 
 		esp_state.unvarnished_bytes++; /* keep track of how many bytes to send out, once the timing window closes */
+		if(cycle < esp_state.unvarnished_end_cycle && (esp_state.unvarnished_end_cycle - cycle) > 100000UL) /* rolled over? */
+			esp_state.unvarnished_end_cycle = cycle;
 
 		if(cycle >= esp_state.unvarnished_end_cycle){ /* time to send data? */
 
@@ -103,6 +108,8 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 			cu_esp_net_send_unvarnished(esp_state.write_buf, esp_state.unvarnished_bytes);
 			esp_state.write_buf_pos_in = 0;
 			esp_state.unvarnished_bytes = 0;
+		}else{
+			printf("WAIT UNVARNISHED\n");
 		}
 
 	}else if(esp_state.user_input_mode == ESP_USER_MODE_SEND){ /* send fixed length mode(prefixed with send command)? */
@@ -119,7 +126,7 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 	}else if(esp_state.user_input_mode == ESP_USER_MODE_AT){
 
 		if(val == '\n' && esp_state.write_buf_pos_in > 1 && esp_state.write_buf[esp_state.write_buf_pos_in-2] == '\r'){ /* AT mode, and something that ends with "\r\n"? */
-printf("AT: %d\n", esp_state.write_buf_pos_in);
+//printf("AT: %d\n", esp_state.write_buf_pos_in);
 			esp_state.write_buf[esp_state.write_buf_pos_in] = '\0'; /* terminate it as a string */
 			cu_esp_process_at(esp_state.write_buf);
 			esp_state.write_buf_pos_in = 0UL;
@@ -133,18 +140,22 @@ printf("AT: %d\n", esp_state.write_buf_pos_in);
 
 auint cu_esp_update_timer_counts(auint cycle){
 
-
 	uint8 i;
 	auint tdelta;
-	auint earliest = cycle;//earliest time another bytes by can be transmitted, based on all delay timers
+//	auint earliest = cycle;//earliest time another bytes by can be transmitted, based on all delay timers
+	auint last_available = esp_state.read_buf_pos_out;//based on all delay timers, last position in buffer that could be used yet
 	if(cycle > esp_state.last_cycle_tick)
 		tdelta = WRAP32(cycle - esp_state.last_cycle_tick);
 	else
 		tdelta = WRAP32(esp_state.last_cycle_tick - cycle);
 
+	esp_state.last_cycle_tick = cycle;/* keep track of the last tick cycle for timing logic */
+//printf("%d\n", tdelta);
 	if(esp_state.ip_delay_timer){ /* process timer for getting an IP after joining an AP */
+//printf("CYCLE: %d, LAST: %d, DELAY %d\n", cycle, esp_state.last_cycle_tick, esp_state.ip_delay_timer);
 		if(esp_state.ip_delay_timer <= tdelta){
 			esp_state.ip_delay_timer = 0;
+			printf("ESP: Wifi Got IP\n");
 			cu_esp_txp((const char *)"WIFI GOT IP\r\n");
 		}else
 			esp_state.ip_delay_timer -= tdelta;
@@ -159,7 +170,8 @@ auint cu_esp_update_timer_counts(auint cycle){
 		}else
 			esp_state.join_delay_timer -= tdelta;
 	}
-return esp_state.read_buf_pos_out;
+
+return last_available;
 ///////////////////////////////////////////////
 
 
@@ -175,17 +187,25 @@ return esp_state.read_buf_pos_out;
 		}
 		/* see if this timer is preventing further UART data to be transferred */
 		esp_state.delay_len[i] -= tdelta;
+		if(esp_state.delay_pos[i] < last_available)
+			last_available = esp_state.delay_pos[i];
 		
 	}
-	esp_state.last_cycle_tick = cycle;/* keep track of the last tick cycle for timing logic */
 
-	return earliest;
+	return last_available;
 }
 
 
 auint cu_esp_uzebox_read_ready(auint cycle){ /* host side checking if a byte has been received */
 
+	if(esp_state.read_ready_cycle > cycle && (esp_state.read_ready_cycle - cycle) > 100000UL){ /* rolled over? */
+	printf("ROLLED OVER\n");
+sleep(5);
+		esp_state.read_ready_cycle = cycle;
+	}
+
 	if(cycle >= esp_state.read_ready_cycle){
+//printf("R\n");
 		esp_state.read_ready_cycle = 0UL;
 
 		auint buf_next = cu_esp_update_timer_counts(cycle);/* based on timing, get the max position we can send from */
@@ -206,7 +226,7 @@ auint cu_esp_uzebox_read_ready(auint cycle){ /* host side checking if a byte has
 			}
 		}
 	}
-
+//printf("N\n");
 	return 0;
 }
 
@@ -230,8 +250,13 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 //	printf("ESP uzebox read %d(%c), cycle %d\n", val, val, cycle);
 	esp_state.read_ready_cycle = WRAP32(cycle + esp_state.uart_baud_bits); /* uart_baud_bits is recalculated everytime UART flags are changed */
 
-	if(esp_state.uart_rx_enabled) /* we need to process UART even if Uzebox wont received it, to keep timing behavior correct for network data, etc */
+	if(esp_state.uart_rx_enabled){ /* we need to process UART even if Uzebox wont received it, to keep timing behavior correct for network data, etc */
+
+//		if(esp_state.uart_scramble) /* wrong UART settings? scramble the data(not modeling the nearly analog nature of real framing errors...) */
+//			val = ((val * val) & 0b01010101);
+
 		return val;
+	}
 	return 0;
 }
 
@@ -320,13 +345,13 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 		if(esp_state.reset_pin){ /* just got reset? */
 
 			esp_state.reset_pin = 0;
+			esp_state.last_cycle_tick = cycle;
 			cu_esp_reset_uart();
 			cu_esp_reset_network();
 			printf("ESP Shutdown\n");
 		}/* else held reset */
 
 	}else if (!esp_state.reset_pin){ /* RST pin just got released, boot */
-
 		esp_state.reset_pin = 1;
 		cu_esp_load_config();
 		cu_esp_reset_uart(); /* clear buffers and set default baud bits/divisor */
@@ -339,7 +364,7 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 //		esp_state.wifi_timer = 1;
 //		esp_state.wifi_delay = ESP_AT_CWJAP_DELAY;
 		cu_esp_txp(start_up_string);
-		printf("ESP Start\n");
+		printf("ESP: Start\n");
 	}
 }
 
@@ -360,17 +385,17 @@ sint32 cu_esp_init_sockets(){
 	}
 #endif
 
-//	cu_esp_reset_network();
-
 	return 0;
 }
 
 void cu_esp_reset_network(){
-	cu_esp_init_sockets();
+	cu_esp_init_sockets(); /* prepare sockets, if necessary(winsock) */
 	for (sint32 i=0;i<4;i++){
 		esp_state.socks[i] = ESP_INVALID_SOCKET;
 		esp_state.proto[i] = ESP_INVALID_SOCKET;
 	}
+
+	esp_state.ip_delay_timer = ESP_AT_IP_DELAY;
 }
 
 
@@ -589,7 +614,7 @@ printf("ESP Starting Transparent Transmission\n");
 }
 
 
-void cu_esp_at_cwjap(sint8 *cmd_buf){ /* Join a wifi access point, fake, this could use the host hardware to be real */
+void cu_esp_at_cwjap(sint8 *cmd_buf){ /* Join a wifi access point, fake, wont use host hardware to make this real */
 printf("ESP Join AP\n");
 	uint8 at_error = 0;
 	sint32 i;
@@ -605,11 +630,11 @@ printf("jap failed?!?");
 		}
 
 	}else{ /* Check the credentials against the fake APs */
-/* need to send "WIFI GOT IP" */
+
 		/* TODO HACK */
 
-		cu_esp_txp((const char *)"WIFI GOT IP\r\n");
 		cu_esp_timed_stall(ESP_AT_CWJAP_DELAY);
+		esp_state.ip_delay_timer = ESP_AT_IP_DELAY;
 		cu_esp_txp_ok();
 		return;
 		if (cmd_buf[3+6] != '"'){ /* Must start with '"' */
@@ -723,7 +748,7 @@ void cu_esp_at_ate(sint8 *cmd_buf){
 	if (!strncmp("0\r\n",(const char*)&cmd_buf[3],3)){ /* Turn echo off */
 		/* cu_esp_timed_stall(ESP_AT_MS_DELAY*2000); */
 		cu_esp_txp_ok();
-cu_esp_txp("WIFI GOT IP\r\n"); //HACK HACK
+//cu_esp_txp("WIFI GOT IP\r\n");
 		esp_state.state &= ~ESP_ECHO;
 
 	}else if (!strncmp("1\r\n",(const char*)&cmd_buf[3],3)){ /* Turn echo on */
@@ -961,7 +986,7 @@ TODO*/
 /* 	ssoe = setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, (void *)&enable, sizeof(enable));//allow port reuse */
 /* see auto-es for other ideas... */
 #endif
-		printf("ESP ERROR: Ioctl() failed to set non-blocking mode\n");
+		printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error());
 		return;
 	}
 	//listen(sock);
@@ -1329,6 +1354,7 @@ void cu_esp_reset_factory(){
 
 	esp_state.uart_baud_bits_module_default = ESP_FACTORY_DEFAULT_BAUD_BITS; /* 9600 baud */
 	esp_state.uart_baud_bits_module = ESP_FACTORY_DEFAULT_BAUD_BITS;
+	esp_state.baud_rate=9600UL;
 
 	memset(esp_state.soft_ap_name,'\0',sizeof(esp_state.soft_ap_name));
 	sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
@@ -1349,10 +1375,11 @@ void cu_esp_reset_factory(){
 	sprintf((char *)esp_state.wifi_pass,"h6dkj90xghrwx89hncx59ktre61hb2k77de67v1");
 
 	memset(esp_state.wifi_mac,'\0',sizeof(esp_state.wifi_mac));
-	sprintf((char *)esp_state.wifi_mac,"ec:44:4a:67:cb:d8");
+	sprintf((char *)esp_state.wifi_mac,"60:22:32:e5:f3:85");
 
 	memset(esp_state.wifi_ip,'\0',sizeof(esp_state.wifi_ip));
 	sprintf((char *)esp_state.wifi_ip,"10.0.0.1");
+
 }
 
 
@@ -1769,22 +1796,18 @@ void cu_esp_save_config(){
 		return;
 	}
 
-		fwrite(esp_state.soft_ap_name,1,sizeof(esp_state.soft_ap_name),f);
-		fwrite(esp_state.soft_ap_pass,1,sizeof(esp_state.soft_ap_pass),f);
-		fwrite(esp_state.soft_ap_mac,1,sizeof(esp_state.soft_ap_mac),f);
-		fwrite(esp_state.soft_ap_ip,1,sizeof(esp_state.soft_ap_ip),f);
-
-
-		fwrite(esp_state.wifi_name,1,sizeof(esp_state.wifi_name),f);
-		fwrite(esp_state.wifi_pass,1,sizeof(esp_state.wifi_pass),f);
-		fwrite(esp_state.wifi_mac,1,sizeof(esp_state.wifi_mac),f);
-		fwrite(esp_state.wifi_ip,1,sizeof(esp_state.wifi_ip),f);
-
-		fputc(esp_state.uart_baud_bits_module_default,f);
+	fprintf(f, "SoftApName=\"%s\"\n", esp_state.soft_ap_name);
+	fprintf(f, "SoftApPass=\"%s\"\n", esp_state.soft_ap_pass);
+	fprintf(f, "SoftApMac=\"%s\"\n", esp_state.soft_ap_mac);
+	fprintf(f, "SoftApIp=\"%s\"\n", esp_state.soft_ap_ip);
+	fprintf(f, "WifiName=\"%s\"\n", esp_state.wifi_name);
+	fprintf(f, "WifiPass=\"%s\"\n", esp_state.wifi_pass);
+	fprintf(f, "WifiMac=\"%s\"\n", esp_state.wifi_mac);
+	fprintf(f, "WifiIp=\"%s\"\n", esp_state.wifi_ip);
+	fprintf(f, "Baud=\"%d\"\n", esp_state.baud_rate);
 	fclose(f);
 	printf("ESP: Saved Config esp.cfg\n");
 }
-
 
 
 auint cu_esp_load_config(){
@@ -1793,47 +1816,53 @@ auint cu_esp_load_config(){
 	auint ret = 0;
 
 	FILE *f = fopen("esp.cfg","r");
-	if (f == NULL){
-		printf("\nESP: esp.cfg settings file does not exist\n");
-		f = fopen("esp.cfg","wb");
-		if (f == NULL)
-			printf("ESP ERROR: Failed to create esp.cfg, settings will not be saved\n");
-		else
-			printf("ESP: Created esp.cfg settings file\n");
-		fclose(f);
-
+	if (f == NULL){ /* try creating a fresh config */
+		printf("\nESP: esp.cfg settings file does not exist, using factory defaults\n");
 		cu_esp_reset_factory();
 		cu_esp_save_config();
-
-	}else{
-		ret = fread(esp_state.soft_ap_name,1,sizeof(esp_state.soft_ap_name),f);
-		ret = fread(esp_state.soft_ap_pass,1,sizeof(esp_state.soft_ap_pass),f);
-		ret = fread(esp_state.soft_ap_mac,1,sizeof(esp_state.soft_ap_mac),f);
-		ret = fread(esp_state.soft_ap_ip,1,sizeof(esp_state.soft_ap_ip),f);
-
-		ret = fread(esp_state.wifi_name,1,sizeof(esp_state.wifi_name),f);
-		ret = fread(esp_state.wifi_pass,1,sizeof(esp_state.wifi_pass),f);
-		ret = fread(esp_state.wifi_mac,1,sizeof(esp_state.wifi_mac),f);
-		ret = fread(esp_state.wifi_ip,1,sizeof(esp_state.wifi_ip),f);
-
-		esp_state.uart_baud_bits_module_default = fgetc(f);
-
-		if (esp_state.state & ESP_DID_FIRST_TICK){
-			printf("\nesp.cfg configuration loaded\n");
-			printf("Wifi SSID:\"%s\"\n",esp_state.wifi_name);
-			printf("esp_state.wifi_pass:\"%s\"\n",esp_state.wifi_pass);
-			printf("esp_state.wifi_mac:\"%s\"\n",esp_state.wifi_mac);
-			printf("esp_state.wifi_ip:\"%s\"\n",esp_state.wifi_ip);
-
-			printf("SoftAP SSID:\"%s\"\n",esp_state.soft_ap_name);
-			printf("esp_state.soft_ap_pass:\"%s\"\n",esp_state.soft_ap_pass);
-			printf("esp_state.soft_ap_mac:\"%s\"\n",esp_state.soft_ap_mac);
-			printf("esp_state.soft_ap_ip:\"%s\"\n",esp_state.soft_ap_ip);
-			printf("Default Baud Divisor:%d\n",esp_state.uart_baud_bits_module_default);
-
-		}
-		fclose(f);
+		return 0;
 	}
+
+	char buf[512];
+	while(fgets(buf, sizeof(buf), f)){ /* parse each line */
+		if(buf[strspn(buf, " ")] == '\n') /* accept blank lines */
+			continue;
+		if(buf[0] == '#') /* accept comment lines */
+			continue;
+
+		if(sscanf(buf, " SoftApName = \"%[^\"]\" ", esp_state.soft_ap_name)){
+			continue;
+		}else if(sscanf(buf, " SoftApPass = \"%[^\"]\" ", esp_state.soft_ap_pass)){
+			continue;
+		}else if(sscanf(buf, " SoftApMac = \"%[^\"]\" ", esp_state.soft_ap_mac)){
+			continue;
+		}else if(sscanf(buf, " SoftApIp = \"%[^\"]\" ", esp_state.soft_ap_ip)){
+			continue;
+		}else if(sscanf(buf, " WifiName = \"%[^\"]\" ", esp_state.wifi_name)){
+			continue;
+		}else if(sscanf(buf, " WifiPass = \"%[^\"]\" ", esp_state.wifi_pass)){
+			continue;
+		}else if(sscanf(buf, " WifiMac = \"%[^\"]\" ", esp_state.wifi_mac)){
+			continue;
+		}else if(sscanf(buf, " WifiIp = \"%[^\"]\" ", esp_state.wifi_ip)){
+			continue;
+		}else if(sscanf(buf, " Baud = \"%u\" ", &esp_state.baud_rate)){
+			continue;
+		}
+	}
+
+	printf("ESP: Loaded CFG File:\n");
+	printf("\tWifiName[%s]\n", esp_state.wifi_name);
+	printf("\tWifiPass[%s]\n", esp_state.wifi_pass);
+	printf("\tWifiMac[%s]\n", esp_state.wifi_mac);
+	printf("\tWifiIp[%s]\n", esp_state.wifi_ip);
+	printf("\tSoftApName[%s]\n", esp_state.soft_ap_name);
+	printf("\tSoftApPass[%s]\n", esp_state.soft_ap_pass);
+	printf("\tSoftApMac[%s]\n", esp_state.soft_ap_mac);
+	printf("\tSoftApIp[%s]\n", esp_state.soft_ap_ip);
+	printf("\tBaud[%d]\n", esp_state.baud_rate);
+	fclose(f);
+	
 	return ret;
 }
 
@@ -1843,7 +1872,33 @@ auint cu_esp_load_config(){
 /*       Network/Sockets        */
 /*                              */
 /********************************/
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+//HACK, this function is only available if #define WINVER 0x6000 or greater?!
+//just throw it in for now...
+int inet_pton(int af, const char *src, void *dst)
+{
+  struct sockaddr_storage ss;
+  int size = sizeof(ss);
+  char src_copy[INET6_ADDRSTRLEN+1];
 
+  ZeroMemory(&ss, sizeof(ss));
+  /* stupid non-const API */
+  strncpy (src_copy, src, INET6_ADDRSTRLEN+1);
+  src_copy[INET6_ADDRSTRLEN] = 0;
+
+  if (WSAStringToAddress(src_copy, af, NULL, (struct sockaddr *)&ss, &size) == 0) {
+    switch(af) {
+      case AF_INET:
+    *(struct in_addr *)dst = ((struct sockaddr_in *)&ss)->sin_addr;
+    return 1;
+      case AF_INET6:
+    *(struct in6_addr *)dst = ((struct sockaddr_in6 *)&ss)->sin6_addr;
+    return 1;
+    }
+  }
+  return 0;
+} 
+#endif
 sint32 cu_esp_net_connect(sint8 *hostname, uint32 sock, uint32 port, uint32 type){
 
 //port = 80;
@@ -1860,7 +1915,10 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 	ahints.ai_family   = AF_UNSPEC;
 	ahints.ai_socktype = SOCK_STREAM;
 
+
 	sint32 r = inet_pton(AF_INET, (char *)hostname, &host_addr);
+
+
 	if(r == 1){ /* IPv4 address? */
 		ahints.ai_family = AF_INET;
 		ahints.ai_flags |= AI_NUMERICHOST;
@@ -1874,6 +1932,7 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 	}
 
 	sint32 rc = getaddrinfo((char *)hostname, hostport, &ahints, &ares);  /* get a linked list of addresses for the hostname */
+
 	if(rc != 0){
 
 		printf("ESP ERROR: can't find host [%s]: %d\n", (char *)hostname, (int)cu_esp_get_last_error());
@@ -2067,8 +2126,10 @@ void cu_esp_timed_stall(auint cycles){ /* TODO make this work the new way...*/
 
 void cu_esp_reset_uart(){
 
-	if(esp_state.uart_baud_bits_module_default == 0) /* failed to load config file? use a factory default */
+	if(esp_state.uart_baud_bits_module_default == 0){ /* failed to load config file? use a factory default */
 		esp_state.uart_baud_bits_module_default = ESP_FACTORY_DEFAULT_BAUD_BITS;
+		esp_state.baud_rate = ESP_FACTORY_BAUD_RATE;
+	}
 
 	esp_state.uart_baud_bits_module = esp_state.uart_baud_bits_module_default;
 
@@ -2126,12 +2187,16 @@ void cu_esp_txp_error(){ cu_esp_txp((const char*)"ERROR\r\n"); }
 void cu_esp_txp_ok(){ cu_esp_txp((const char*)"OK\r\n"); }
 
 
-sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
+sint32 cu_esp_host_serial_start(){
 
-	auint original_baud = baud;
+	if(esp_state.host_serial_port != 0)
+		cu_esp_host_serial_end();
+
+	auint original_baud = esp_state.baud_rate;
+	auint baud = original_baud;
 
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
-	esp_state.host_serial_port = CreateFileA((LPCSTR)dev, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	esp_state.host_serial_port = CreateFileA((LPCSTR)esp_state.host_serial_device_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (esp_state.host_serial_port == INVALID_HANDLE_VALUE){
 		printf("ESP ERROR: Host Serial CreateFileA() failed: %u\n", (unsigned int)GetLastError());
 		return ESP_SERIAL_OPEN_ERROR;
@@ -2206,11 +2271,11 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 	port_settings.c_iflag = IGNPAR;
 	port_settings.c_oflag = 0;
 	port_settings.c_lflag = 0;
-	port_settings.c_cc[VMIN] = 0;      // block untill n bytes are received
-	port_settings.c_cc[VTIME] = 0;     // block untill a timer expires (n * 100 mSec.)	
+	port_settings.c_cc[VMIN] = 0;// block untill n bytes are received
+	port_settings.c_cc[VTIME] = 0;// block untill a timer expires (n * 100 mSec.)	
 	cfsetispeed(&port_settings, B115200);
 
-	esp_state.host_serial_port = open((char *)dev, O_RDWR | O_NOCTTY | O_NDELAY);
+	esp_state.host_serial_port = open((char *)esp_state.host_serial_device_name, O_RDWR | O_NOCTTY | O_NDELAY);
 
 	if(esp_state.host_serial_port == -1){
 		printf("ESP ERROR: Host Serial open() failed: %d\n", (int)cu_esp_get_last_error());
@@ -2219,7 +2284,7 @@ sint32 cu_esp_host_serial_start(sint8 *dev, auint baud){
 	baud = original_baud;
 #endif
 
-	printf("ESP Host Serial initialized: %s @ %d\n", dev, original_baud);
+	printf("ESP Host Serial initialized: %s @ %d\n", esp_state.host_serial_device_name, original_baud);
 
 	return 0;
 }
@@ -2232,7 +2297,7 @@ void cu_esp_host_serial_end(){
 void cu_esp_host_serial_write(uint8 c){
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	DWORD written;
-	BOOL success = WriteFile(serial_port, buffer, size, &written, NULL);
+	BOOL success = WriteFile(esp_state.host_serial_port, buffer, size, &written, NULL);
 
 	if(!success || written != 1)
 		printf("ESP ERROR: failed to write host serial byte\n");
@@ -2245,15 +2310,20 @@ void cu_esp_host_serial_write(uint8 c){
 }
 
 uint8 cu_esp_host_serial_read(){
+	uint8 c[2];
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	DWORD received;
-	BOOL success = ReadFile(serial_port, buffer, 1, &received, NULL);
+	BOOL success = ReadFile(esp_state.host_serial_port, c, 1, &received, NULL);
 	if (!success){
-		printf("Failed to read from port");
+		printf("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
 		return 0;
 	}
 #else
-
+	ssize_t received = read(esp_state.host_serial_port, c, 1);
+	if(received == -1){
+		printf("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
+		return 0;
+	}
 #endif
 	//return received;
 	return 0;
