@@ -1901,8 +1901,48 @@ int inet_pton(int af, const char *src, void *dst)
 #endif
 sint32 cu_esp_net_connect(sint8 *hostname, uint32 sock, uint32 port, uint32 type){
 
-//port = 80;
 printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, sock, port, (type == ESP_PROTO_TCP ? "TCP":"UDP"));
+
+
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	LPHOSTENT hostEntry;
+	hostEntry = gethostbyname(hostname);
+	if(!hostEntry){
+		printf("ESP: gethostbyname() failed: %d\n", cu_esp_get_last_error());
+		return INVALID_SOCKET;
+	}
+
+	esp_state.socks[sock] = socket(AF_INET,(type & ESP_PROTO_TCP)?SOCK_STREAM:SOCK_DGRAM,(type & ESP_PROTO_TCP)?IPPROTO_TCP:0);
+
+	if(esp_state.socks[sock] == INVALID_SOCKET){
+		printf("ESP: Failed to create socket: %d\n", cu_esp_get_last_error());
+		return INVALID_SOCKET;
+	}
+
+	SockInfo[sock].sin_family = AF_INET;
+	SockInfo[sock].sin_addr = *((LPIN_ADDR)*hostEntry->h_addr_list);
+	SockInfo[sock].sin_port = htons(port);
+
+	if((connect(esp_state.socks[sock],(LPSOCKADDR)&SockInfo[sock],sizeof(struct sockaddr))) == SOCKET_ERROR){
+		esp_state.socks[sock] = INVALID_SOCKET;
+
+		if(cu_esp_get_last_error() == WSAECONNREFUSED){
+			printf("ESP: Remote actively refused connection, wrong port?\n");
+			return INVALID_SOCKET;
+		}else{
+			printf("ESP: Failed to connect, timeout or socket error: %d\n",cu_esp_get_last_error());
+			return INVALID_SOCKET;
+		}
+
+		unsigned long block_mode = 1;
+		if(ioctlsocket(esp_state.socks[sock],FIONBIO,&block_mode) != NO_ERROR){
+			printf("ESP: ioctlsocket() failed to set non-blocking mode: %d\n",cu_esp_get_last_error());
+			return INVALID_SOCKET;
+		}
+	}
+#else
+
+
 	/* do things the modern non-depreciated way, now supporting IPv6! */
 	char hostport[8];
 	sprintf(hostport, "%d", port);
@@ -1911,7 +1951,9 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 	struct addrinfo *ares = NULL;
 
 	memset(&ahints, 0x00, sizeof(ahints));
+
 	ahints.ai_flags    = AI_NUMERICSERV;
+
 	ahints.ai_family   = AF_UNSPEC;
 	ahints.ai_socktype = SOCK_STREAM;
 
@@ -1960,47 +2002,7 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 	}while(ares != NULL);
 
 
-/*
-	host_entry = gethostbyname(host);
-
-	if (host_entry == NULL){
-		printf("ESP ERROR: gethostbyname(%s) failed", host);
-
-		return ESP_INVALID_SOCKET;
-	}
-
-	esp_state.socks[sock] = socket(AF_INET,SOCK_STREAM,0);//((type & ESP_PROTO_TCP)?SOCK_STREAM:SOCK_DGRAM),0);//((type & ESP_PROTO_TCP)?IPPROTO_TCP:0));
-printf("SOCKET: %d\n", esp_state.socks[sock]);
-	if (esp_state.socks[sock] == ESP_INVALID_SOCKET){
-		printf("ESP ERROR: Failed to create socket: %d\n", cu_esp_get_last_error());
-		return ESP_INVALID_SOCKET;
-	}
-
-//TODO FIND HOST ADDRESS????
-
-
-
-	esp_state.sock_info[sock].sin_family = AF_UNSPEC;//AF_INET;
-	esp_state.sock_info[sock].sin_addr.s_addr = INADDR_ANY;// *((LPIN_ADDR)*hostEntry->h_addr_list);
-	esp_state.sock_info[sock].sin_port = htons(port);
-*/
-
-/*
-#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
-	if ( (connect(esp_state.socks[sock],(LPSOCKADDR)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == ESP_SOCKET_ERROR){
-#else
-	if ( (connect(esp_state.socks[sock],(struct sockaddr *)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == ESP_SOCKET_ERROR){
 #endif
-		esp_state.socks[sock] = ESP_INVALID_SOCKET;
-
-		if (cu_esp_get_last_error() == ESP_ECONNREFUSED)
-			printf("ESP ERROR: Remote actively refused connection: %d\n", cu_esp_get_last_error());
-		else
-			printf("ESP ERROR: Failed to connect, timeout or socket error: %d\n", cu_esp_get_last_error());
-
-		return ESP_INVALID_SOCKET;
-	}
-*/
 	auint block_mode = 1;
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	if (ioctlsocket(esp_state.socks[sock],FIONBIO,(u_long *)&block_mode) != 0){ printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); return ESP_INVALID_SOCKET; }
@@ -2297,7 +2299,7 @@ void cu_esp_host_serial_end(){
 void cu_esp_host_serial_write(uint8 c){
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	DWORD written;
-	BOOL success = WriteFile(esp_state.host_serial_port, buffer, size, &written, NULL);
+	BOOL success = WriteFile(esp_state.host_serial_port, &c, 1, &written, NULL);
 
 	if(!success || written != 1)
 		printf("ESP ERROR: failed to write host serial byte\n");
