@@ -72,10 +72,10 @@ ifeq ($(TSYS),windows_mingw)
 OUT=cuzebox.exe
 CFLAGS+= -DTARGET_WINDOWS_MINGW -Dmain=SDL_main
 ifeq ($(FLAG_USE_SDL1),0)
-LINKB= -lmingw32 -lSDL2main -lSDL2 -mwindows
+LINKB= -lmingw32 -lSDL2main -lSDL2 -mwindows -lws2_32
 else
 CFLAGS+= -DUSE_SDL1
-LINKB= -lmingw32 -lSDLmain -lSDL -mwindows
+LINKB= -lmingw32 -lSDLmain -lSDL -mwindows -lws2_32
 endif
 ENABLE_VCAP=$(FLAG_VCAP)
 CHCONV=chconv.exe
@@ -167,4 +167,3 @@ endif
 
 CFSPD+= $(CFLAGS)
 CFSIZ+= $(CFLAGS)
-
