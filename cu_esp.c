@@ -1919,11 +1919,11 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 		return INVALID_SOCKET;
 	}
 
-	SockInfo[sock].sin_family = AF_INET;
-	SockInfo[sock].sin_addr = *((LPIN_ADDR)*hostEntry->h_addr_list);
-	SockInfo[sock].sin_port = htons(port);
+	esp_state.sock_info[sock].sin_family = AF_INET;
+	esp_state.sock_info[sock].sin_addr = *((LPIN_ADDR)*hostEntry->h_addr_list);
+	esp_state.sock_info[sock].sin_port = htons(port);
 
-	if((connect(esp_state.socks[sock],(LPSOCKADDR)&SockInfo[sock],sizeof(struct sockaddr))) == SOCKET_ERROR){
+	if((connect(esp_state.socks[sock],(LPSOCKADDR)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == SOCKET_ERROR){
 		esp_state.socks[sock] = INVALID_SOCKET;
 
 		if(cu_esp_get_last_error() == WSAECONNREFUSED){
