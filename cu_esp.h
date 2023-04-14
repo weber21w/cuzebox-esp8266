@@ -84,6 +84,7 @@
 #define ESP_USER_MODE_PASSTHROUGH	3 /* UART data is passed onto a physical UART devices connected to the host machine running the emulator */
 
 #define ESP_FACTORY_DEFAULT_BAUD_BITS	30//92///185 /* 9600 */
+#define ESP_FACTORY_BAUD_RATE		9600
 
 #define ESP_BIN_ECHO			1//responds back with 0b10101011
 #define ESP_BIN_CONNECT		2
@@ -113,6 +114,7 @@
 #define	ESP_AT_CWLAP_DELAY			4000UL*ESP_AT_MS_DELAY
 #define	ESP_AT_CWLAP_INTER_DELAY		6UL*ESP_AT_MS_DELAY
 #define	ESP_AT_CWJAP_DELAY			1800UL*ESP_AT_MS_DELAY
+#define	ESP_AT_IP_DELAY			100UL*ESP_AT_MS_DELAY
 #define	ESP_UNVARNISHED_DELAY			20UL*ESP_AT_MS_DELAY
 #define	ESP_AT_RST_DELAY			ESP_AT_OK_DELAY
 
@@ -188,6 +190,7 @@ typedef struct{
 
 
 	auint		user_input_mode;//AT, send mode(awaiting predetermined bytes), unvarnished(awaiting predetermined time period)
+	auint		baud_rate;//actual numerical baud value(ie. 115200)
 	auint		baud_divisor;//baud divisor of the Uzebox
 	auint		baud_divisor_module;//baud divisor of the ESP
 	uint8		write_enabled;
@@ -221,6 +224,8 @@ typedef struct{
 	auint		uart_baud_bits_module; /* the equivalent for the module's current speed(which may be different than the 644) */
 
 	auint		uart_baud_bits_module_default; /* the value to use after a module reset */
+
+	sint8		host_serial_device_name[256];
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	HANDLE		host_serial_port;
 #else
@@ -412,13 +417,8 @@ void cu_esp_save_mode();
 void cu_esp_save_wifi_credentials();
 void cu_esp_save_auto_conn();
 
-/* emulator only AT commands */
-void cu_esp_at_hserial_start(sint8 *cmd_buf);
-void cu_esp_at_hserial_stop(sint8 *cmd_buf);
-void cu_esp_at_hserial_send(sint8 *cmd_buf);
-void cu_esp_at_hserial_read(sint8 *cmd_buf); /* should we also support transparent mode? */
 
-sint32 cu_esp_host_serial_start(sint8 *dev, auint baud);
+sint32 cu_esp_host_serial_start();
 void cu_esp_host_serial_end();
 void cu_esp_host_serial_write(uint8 c);
 uint8 cu_esp_host_serial_read();
