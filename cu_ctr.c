@@ -28,9 +28,8 @@
 
 
 #include "cu_ctr.h"
-extern uint8 cu_kbd_enabled;
-extern uint8 cu_mouse_enabled;
-
+#include "cu_kbd.h"
+#include "cu_mouse.h"
 
 /* SNES controller buttons */
 #define CU_CTR_SNES_B        0U
@@ -95,23 +94,24 @@ auint cu_ctr_process(auint prev, auint curr)
  auint rise = chg  & curr;
  auint i;
  auint ret;
-
+ uint8 kbd_enabled = cu_kbd_get_enabled();
+ uint8 mouse_enabled = cu_mouse_get_enabled();
  
- if(cu_kbd_enabled && !cu_mouse_enabled){ /* only read P1 pad due to keyboard*/
+ if(kbd_enabled && !mouse_enabled){ /* only read P1 pad due to keyboard*/
   ret = ((cu_ctr_blatch[0] & 1U)); /* write P1 current data bit */
   if(rise == 0x04U){ /* latch event, capture current state */
    cu_ctr_blatch[0] = cu_ctr_mfilt(cu_ctr_buttons[0]); /* eliminate mechanically impossible combinations */
   }else if (rise == 0x08U){ /* Clock event(we already wrote current bit) */
     cu_ctr_blatch[0] >>= 1; /* get next bit into position */
   }
- }else if(!cu_kbd_enabled && cu_mouse_enabled){ /* no keyboard, but there is a mouse(emulated on P1) */
+ }else if(!kbd_enabled && mouse_enabled){ /* no keyboard, but there is a mouse(emulated on P1) */
   ret = ((cu_ctr_blatch[1] & 1U) << 1); /* write P2 current data bit */
   if(rise == 0x04U){
    cu_ctr_blatch[1] = cu_ctr_mfilt(cu_ctr_buttons[1]);
   }else if (rise == 0x08U){ /* Clock command */
     cu_ctr_blatch[1] >>= 1;
   }
- }else if(cu_kbd_enabled && cu_mouse_enabled){ /* don't use pad data for P1 or P2 as keyboard+mouse is present */
+ }else if(kbd_enabled && mouse_enabled){ /* don't use pad data for P1 or P2 as keyboard+mouse is present */
 
  }else{ /* no keyboard or mouse, populate both P1 and P2 with pad data */
   ret = ((cu_ctr_blatch[0] & 1U)     ) |
@@ -145,7 +145,19 @@ void  cu_ctr_setsnes(auint player, auint buttons)
 }
 
 
-
+#ifdef ENABLE_ICAP
+#ifndef ENABLE_IREP
+/*
+** Retrieves current SNES controller state. The buttons are a combination of
+** masks generated from the definitions.
+*/
+void  cu_ctr_getsnes(auint player, auint* buttons)
+{
+ if (player > 1U){ return; }
+ *buttons = ~cu_ctr_buttons[player];
+}
+#endif
+#endif
 /*
 ** Sends state of single SNES controller button. The button is a single
 ** (non-mask) definition.
