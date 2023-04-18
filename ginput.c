@@ -29,16 +29,9 @@
 
 #include "ginput.h"
 #include "cu_ctr.h"
+#include "cu_kbd.h"
+#include "cu_mouse.h"
 
-
-//#include "cu_kbd.h"
-extern uint8 cu_kbd_enabled;
-extern uint8 cu_mouse_enabled;
-extern uint8 cu_mouse_scale;
-extern sint32 cu_mouse_dx, cu_mouse_dy;
-extern uint8 cu_mouse_buttons;
-extern const auint cu_kbd_scan_codes[][2];
-extern void cu_kbd_handle_key(SDL_Event const* ev);
 extern auint guicore_getflags(void);
 extern SDL_Window*   guicore_window;
 
@@ -272,7 +265,7 @@ void  ginput_sendevent(SDL_Event const* ev)
  auint player = 0U;
 
  /* Keyboard input: Player 1 */
- if(cu_kbd_enabled && ((ev->type) == SDL_KEYDOWN || (ev->type) == SDL_KEYUP)){
+ if(cu_kbd_get_enabled() && ((ev->type) == SDL_KEYDOWN || (ev->type) == SDL_KEYUP)){
   cu_kbd_handle_key(ev);
  }else if ( (((ev->type) == SDL_KEYDOWN) ||
       ((ev->type) == SDL_KEYUP))){ /* skip key interpretation if keyboard capture is enabled */
@@ -373,7 +366,7 @@ void  ginput_sendevent(SDL_Event const* ev)
       ((ev->type) == SDL_CONTROLLERBUTTONUP)){
 
   player = ginput_gctr_getplayer(ev);
-  if(!cu_kbd_enabled || player != 1){ /* ignore P2 input if the keyboard dongle is enabled */
+  if(!cu_kbd_get_enabled() || player != 1){ /* ignore P2 input if the keyboard dongle is enabled */
 
    if ((ev->type) == SDL_CONTROLLERBUTTONDOWN){ press = TRUE; }
 
@@ -431,7 +424,7 @@ void  ginput_sendevent(SDL_Event const* ev)
  if ( ((ev->type) == SDL_JOYAXISMOTION) ){ /* ignore P2 input if the keyboard dongle is enabled */
 
   player = ginput_gctr_getplayer(ev);
-  if(!cu_kbd_enabled || player != 1){
+  if(!cu_kbd_get_enabled() || player != 1){
    if ((ev->jaxis.axis) == 0U){ /* X axis: Left and Right */
     press = ((ev->jaxis.value) <= -16384);
     ginput_gamectr_dana[player][0] = press;
@@ -450,24 +443,24 @@ void  ginput_sendevent(SDL_Event const* ev)
 
  /* Mouse axis input. Data grabbed here will be built/encoded when controller data is polled, see cu_ctr.c and cu_mouse.c */
  
- if (cu_mouse_enabled){
+ if (cu_mouse_get_enabled()){
   if ((ev->type) == SDL_MOUSEMOTION){ /* http://www.repairfaq.org/REPAIR/F_SNES.html we always report "low sensitivity" */
+   sint32 mdx, mdy;
+   uint8 msc = cu_mouse_get_scale();
+   cu_mouse_set_buttons(SDL_GetRelativeMouseState(&mdx,&mdy));
+   cu_mouse_set_position(mdx>>msc,mdy>>msc);
 
-	cu_mouse_buttons = SDL_GetRelativeMouseState(&cu_mouse_dx,&cu_mouse_dy);
-	cu_mouse_dx >>= cu_mouse_scale;
-	cu_mouse_dy >>= cu_mouse_scale;
-
-	if (guicore_getflags() & 0x0001U){ /* GUICORE_FULLSCREEN HACK TODO */
-		SDL_WarpMouseInWindow(guicore_window,400,300); /* keep mouse centered so it doesn't get stuck on the edge of the screen... */
-		SDL_GetRelativeMouseState(&cu_mouse_dx,&cu_mouse_dy); /*...and immediately consume the bogus motion event it generated. */
-	}
+   if (guicore_getflags() & 0x0001U){ /* GUICORE_FULLSCREEN HACK TODO */
+    SDL_WarpMouseInWindow(guicore_window,400,300); /* keep mouse centered so it doesn't get stuck on the edge of the screen... */
+    SDL_GetRelativeMouseState(&mdx,&mdy); /*...and immediately consume the bogus motion event it generated. */
+   }
   }
  }
 
 
  for (player = 0U; player < 2U; player ++){
-  if(player == 0U && cu_mouse_enabled){ continue; }
-  if(player == 1U && cu_kbd_enabled){ continue; }
+  if (player == 0U && cu_mouse_get_enabled()){ continue; }
+  if (player == 1U && cu_kbd_get_enabled()){ continue; }
   cu_ctr_setsnes_single(player, CU_CTR_SNES_LEFT,  ginput_gamectr_ddig[player][0] || ginput_gamectr_dana[player][0]);
   cu_ctr_setsnes_single(player, CU_CTR_SNES_RIGHT, ginput_gamectr_ddig[player][1] || ginput_gamectr_dana[player][1]);
   cu_ctr_setsnes_single(player, CU_CTR_SNES_UP,    ginput_gamectr_ddig[player][2] || ginput_gamectr_dana[player][2]);
