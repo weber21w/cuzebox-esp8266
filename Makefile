@@ -68,6 +68,9 @@ OBJECTS += $(OBD)/conout.o
 ifneq ($(ENABLE_VCAP), 0)
 OBJECTS += $(OBD)/avconv.o
 endif
+ifneq ($(ENABLE_ICAP), 0)
+OBJECTS += $(OBD)/capture.o
+endif
 ifneq ($(FLAG_SELFCONT), 0)
 OBJECTS += $(OBD)/gamefile.o
 OBJECTS += $(OBD)/filesmin.o
@@ -148,10 +151,10 @@ $(OBD)/cu_ctr.o: cu_ctr.c $(DEPS)
 	$(CC) -c $< -o $@ $(CFSIZ)
 
 $(OBD)/cu_kbd.o: cu_kbd.c $(DEPS)
-	$(CC) -c $< -o $@ $(CFSPD)
+	$(CC) -c $< -o $@ $(CFSIZ)
 
 $(OBD)/cu_mouse.o: cu_mouse.c $(DEPS)
-	$(CC) -c $< -o $@ $(CFSPD)
+	$(CC) -c $< -o $@ $(CFSIZ)
 
 $(OBD)/cu_spi.o: cu_spi.c $(DEPS)
 	$(CC) -c $< -o $@ $(CFSPD)
@@ -193,6 +196,9 @@ $(OBD)/romdump.o: romdump.c $(DEPS)
 	$(CC) -c $< -o $@ $(CFSIZ)
 
 $(OBD)/avconv.o: avconv.c $(DEPS)
+	$(CC) -c $< -o $@ $(CFSIZ)
+
+$(OBD)/capture.o: capture.c $(DEPS)
 	$(CC) -c $< -o $@ $(CFSIZ)
 
 $(OBD)/textgui.o: textgui.c $(DEPS)
