@@ -31,6 +31,8 @@
 #include "cu_hfile.h"
 #include "cu_avr.h"
 #include "cu_ctr.h"
+#include "cu_kbd.h"
+#include "cu_mouse.h"
 #include "filesys.h"
 #include "guicore.h"
 #include "audio.h"
@@ -42,10 +44,10 @@
 #ifdef ENABLE_VCAP
 #include "avconv.h"
 #endif
-extern uint8 cu_kbd_enabled;
-extern uint8 cu_kbd_bypassed;
-extern uint8 cu_mouse_enabled;
-extern uint8 cu_mouse_scale;
+#ifdef ENABLE_ICAP
+#include "capture.h"
+#endif
+
 
 
 /* Initial title */
@@ -357,6 +359,16 @@ static void main_loop(void)
 
  if (!main_ispause){
 
+#ifdef ENABLE_ICAP
+#ifndef ENABLE_IREP
+  capture_inputs();
+#else
+  if (capture_replay()){
+   main_ispause = TRUE; /* Pause emulator after replay is complete */
+  }
+#endif
+#endif
+
 #ifdef ENABLE_VCAP
   rows = frame_run(fdrop && (!main_isvcap), main_fmerge);
   audio_sendframe(frame_getaudio(), rows);
@@ -445,7 +457,6 @@ int main (int argc, char** argv)
  (void)(audio_init());
  (void)(ginput_init());
 
-
  cu_avr_autofuse(bootpri);
  cu_avr_reset();
  main_t5_cc = cu_avr_getcycle();
@@ -477,6 +488,9 @@ int main (int argc, char** argv)
  audio_quit();
  guicore_quit();
  filesys_flushall();
+#ifdef ENABLE_ICAP
+ capture_finalize();
+#endif
 #ifdef ENABLE_VCAP
  avconv_finalize();
 #endif
