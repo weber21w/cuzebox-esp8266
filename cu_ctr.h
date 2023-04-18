@@ -86,6 +86,21 @@ auint cu_ctr_process(auint prev, auint curr);
 void  cu_ctr_setsnes(auint player, auint buttons);
 
 
+
+
+#ifdef ENABLE_ICAP
+#ifndef ENABLE_IREP
+/*
+** Retrieves current SNES controller state. The buttons are a combination of
+** masks generated from the definitions.
+*/
+void  cu_ctr_getsnes(auint player, auint* buttons);
+#endif
+#endif
+
+
+
+
 /*
 ** Sends state of single SNES controller button. The button is a single
 ** (non-mask) definition.
