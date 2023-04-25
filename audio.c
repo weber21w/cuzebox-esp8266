@@ -108,6 +108,9 @@ static boole audio_fs_isena = TRUE;
 */
 void audio_callback(void* dummy, Uint8* stream, int len)
 {
+#ifdef HEADLESS
+ return;
+#endif
  auint i;
  auint brem;
  auint brav;
@@ -253,6 +256,9 @@ static void audio_wasapi_workaround(void)
 */
 boole audio_init(void)
 {
+#ifdef HEADLESS
+ return;
+#endif
  SDL_AudioSpec desired;
 #ifndef USE_SDL1
  SDL_AudioSpec have;

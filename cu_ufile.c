@@ -42,7 +42,10 @@ static const char cu_id[]  = "UzeRom parser: ";
 static const char cu_err[] = "Error: ";
 static const char cu_war[] = "Warning: ";
 
-
+#define PERIPHERAL_MOUSE 1
+#define PERIPHERAL_KEYBOARD 2
+#define PERIPHERAL_MULTITAP 4
+#define PERIPHERAL_ESP8266 8
 
 /*
 ** Attempts to load the passed file into code memory. The code memory is not
@@ -59,6 +62,8 @@ boole cu_ufile_load(char const* fname, uint8* cmem, cu_ufile_header_t* head)
  uint8 buf[512];
  auint i;
  auint len;
+ sint8 psupport_str[256];
+ sint8 pdefault_str[256];
 
  if (!filesys_open(FILESYS_CH_EMU, fname)){
   print_error("%s%sCouldn't open %s.\n", cu_id, cu_err, fname);
@@ -108,17 +113,43 @@ boole cu_ufile_load(char const* fname, uint8* cmem, cu_ufile_header_t* head)
  for (i = 0U; i < 31U; i++){ head->author[i] = buf[46U + i]; }
  head->author[31] = 0U;
 
- for (i = 0U; i < 256U; i++){ head->icon[i] = buf[78U + i]; }
-
+ auint icon_crc = 0;
+ for (i = 0U; i < 256U; i++){
+  head->icon[i] = buf[78U + i];
+  icon_crc += head->icon[i];
+ }
+/*
+ if (icon_crc){
+  uint8 x,y;
+  for (y = 0U; y < 8U; y++){
+   for (x = 0U; x < 8U; x++){
+  
+   }
+   print_unf(" ");
+  }
+ }
+*/
  head->crc32 = ((auint)(buf[334])      ) +
                ((auint)(buf[335]) <<  8) +
                ((auint)(buf[336]) << 16) +
                ((auint)(buf[337]) << 24);
 
- head->mouse = buf[338];
+ head->psupport = buf[338]; /* the peripherals the ROM supports */
+ if (head->psupport & PERIPHERAL_MOUSE){ sprintf((char *)psupport_str+strlen((char *)psupport_str), "Mouse,");}
+ if (head->psupport & PERIPHERAL_KEYBOARD){ sprintf((char *)psupport_str+strlen((char *)psupport_str), "Keyboard,"); }
+ if (head->psupport & PERIPHERAL_MULTITAP){ sprintf((char *)psupport_str+strlen((char *)psupport_str), "Multitap,"); }
+ if (head->psupport & PERIPHERAL_ESP8266){ sprintf((char *)psupport_str+strlen((char *)psupport_str), "ESP8266,"); }
+ if (strlen((char *)psupport_str) && psupport_str[strlen((char *)psupport_str)-1] == ','){ psupport_str[strlen((char *)psupport_str)-1] = '\0'; } /* remove trailing comma, if present */
 
  for (i = 0U; i < 63U; i++){ head->desc[i] = buf[339U + i]; }
  head->desc[63] = 0U;
+
+ head->pdefault = buf[339U+64U+1U]; /* the peripherals that should be "connected" at start(save the user some hotkey presses) */
+ if (head->pdefault & PERIPHERAL_MOUSE){ sprintf((char *)pdefault_str+strlen((char *)pdefault_str), "Mouse,");}
+ if (head->pdefault & PERIPHERAL_KEYBOARD){ sprintf((char *)pdefault_str+strlen((char *)pdefault_str), "Keyboard,"); }
+ if (head->pdefault & PERIPHERAL_MULTITAP){ sprintf((char *)pdefault_str+strlen((char *)pdefault_str), "Multitap,"); }
+ if (head->pdefault & PERIPHERAL_ESP8266){ sprintf((char *)pdefault_str+strlen((char *)pdefault_str), "ESP8266,"); }
+ if (strlen((char *)pdefault_str) && pdefault_str[strlen((char *)pdefault_str)-1] == ','){ pdefault_str[strlen((char *)pdefault_str)-1] = '\0'; } /* remove trailing comma, if present */
 
  rv = filesys_read(FILESYS_CH_EMU, cmem, len);
  if (rv != len){
@@ -136,11 +167,13 @@ boole cu_ufile_load(char const* fname, uint8* cmem, cu_ufile_header_t* head)
   "\tName .......: %s\n"
   "\tAuthor .....: %s\n"
   "\tYear .......: %d\n"
-  "\tDescription : %s\n",
+  "\tDescription : %s\n"
+  "\tSupported ..: %s\n",
   (char*)(&(head->name[0])),
   (char*)(&(head->author[0])),
   head->year,
-  (char*)(&(head->desc[0])));
+  (char*)(&(head->desc[0])),
+  (char*)(&(psupport_str)));
 
  /* Successful */
 

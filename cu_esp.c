@@ -54,6 +54,18 @@
 #include <fcntl.h>
 #endif
 
+#ifdef __EMSCRIPTEN__
+
+//builds worked for EMSCRIPTEN before adding extra linker for threading...
+//at least using "./websocket_to_posix_proxy 8080" seems to actually do what's needed...
+#include <emscripten.h>
+#include <emscripten/websocket.h>
+#include <emscripten/threading.h>
+#include <emscripten/posix_socket.h>
+
+static EMSCRIPTEN_WEBSOCKET_T bridgeSocket = 0;
+#endif
+
 /* esp state */
 static cu_state_esp_t esp_state;
 
@@ -72,7 +84,7 @@ auint cu_esp_uzebox_write_ready(auint cycle){ /* host side checking if it can wr
 
 void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UART byte */
 
-//	printf("ESP uzebox write %d(%c)\n", val, val);
+//	print_message("ESP uzebox write %d(%c)\n", val, val);
 
 	/* need to set a delay until a write can happen again */
 	esp_state.write_ready_cycle = WRAP32(cycle + esp_state.uart_baud_bits); /* uart_baud_bits is recalculated everytime UART flags are changed */
@@ -86,7 +98,7 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 
 	if((esp_state.state & ESP_ECHO) && esp_state.user_input_mode < ESP_USER_MODE_UNVARNISHED){ /* should we echo the byte back? */
 		cu_esp_txp((const char *)&val);
-//printf("ECHO [(const char *)&val]\n");
+//print_message("ECHO [(const char *)&val]\n");
 	}
 
 	if(esp_state.user_input_mode == ESP_USER_MODE_UNVARNISHED){ /* sending time window mode? */
@@ -99,7 +111,7 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 
 			if(esp_state.unvarnished_bytes == 3){ /* check special case */
 				if(esp_state.write_buf[0] == '+' && esp_state.write_buf[1] == '+' && esp_state.write_buf[2] == '+'){/* single timing window containing only "+++"?, then break out of unvarnished mode */
-					printf("ESP Broke out of transparent/unvarnished mode\n");
+					print_message("ESP Broke out of transparent/unvarnished mode\n");
 					esp_state.user_input_mode = ESP_USER_MODE_AT;
 					return;
 				}
@@ -109,7 +121,7 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 			esp_state.write_buf_pos_in = 0;
 			esp_state.unvarnished_bytes = 0;
 		}else{
-			printf("WAIT UNVARNISHED\n");
+			print_message("WAIT UNVARNISHED\n");
 		}
 
 	}else if(esp_state.user_input_mode == ESP_USER_MODE_SEND){ /* send fixed length mode(prefixed with send command)? */
@@ -126,7 +138,7 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 	}else if(esp_state.user_input_mode == ESP_USER_MODE_AT){
 
 		if(val == '\n' && esp_state.write_buf_pos_in > 1 && esp_state.write_buf[esp_state.write_buf_pos_in-2] == '\r'){ /* AT mode, and something that ends with "\r\n"? */
-//printf("AT: %d\n", esp_state.write_buf_pos_in);
+//print_message("AT: %d\n", esp_state.write_buf_pos_in);
 			esp_state.write_buf[esp_state.write_buf_pos_in] = '\0'; /* terminate it as a string */
 			cu_esp_process_at(esp_state.write_buf);
 			esp_state.write_buf_pos_in = 0UL;
@@ -150,12 +162,12 @@ auint cu_esp_update_timer_counts(auint cycle){
 		tdelta = WRAP32(esp_state.last_cycle_tick - cycle);
 
 	esp_state.last_cycle_tick = cycle;/* keep track of the last tick cycle for timing logic */
-//printf("%d\n", tdelta);
+//print_message("%d\n", tdelta);
 	if(esp_state.ip_delay_timer){ /* process timer for getting an IP after joining an AP */
-//printf("CYCLE: %d, LAST: %d, DELAY %d\n", cycle, esp_state.last_cycle_tick, esp_state.ip_delay_timer);
+//print_message("CYCLE: %d, LAST: %d, DELAY %d\n", cycle, esp_state.last_cycle_tick, esp_state.ip_delay_timer);
 		if(esp_state.ip_delay_timer <= tdelta){
 			esp_state.ip_delay_timer = 0;
-			printf("ESP: Wifi Got IP\n");
+			print_message("ESP: Wifi Got IP\n");
 			cu_esp_txp((const char *)"WIFI GOT IP\r\n");
 		}else
 			esp_state.ip_delay_timer -= tdelta;
@@ -199,13 +211,13 @@ return last_available;
 auint cu_esp_uzebox_read_ready(auint cycle){ /* host side checking if a byte has been received */
 
 	if(esp_state.read_ready_cycle > cycle && (esp_state.read_ready_cycle - cycle) > 100000UL){ /* rolled over? */
-	printf("ROLLED OVER\n");
+	print_message("ROLLED OVER\n");
 sleep(5);
 		esp_state.read_ready_cycle = cycle;
 	}
 
 	if(cycle >= esp_state.read_ready_cycle){
-//printf("R\n");
+//print_message("R\n");
 		esp_state.read_ready_cycle = 0UL;
 
 		auint buf_next = cu_esp_update_timer_counts(cycle);/* based on timing, get the max position we can send from */
@@ -215,18 +227,18 @@ sleep(5);
 			if(buf_next == esp_state.read_buf_pos_out) /* no timer delays prevent this data being sent yet? */
 				return (1<<RXC0);
 			else{
-				printf("<<<<STALL>>>>\n");
+				print_message("<<<<STALL>>>>\n");
 				return 0; /* some timer is preventing further output, it likely pre-queued a delayed message that is not to be sent yet */
 			}
 		}else if(esp_state.state & ESP_INTERNET_ACCESS){ /* no data queued, see if there is new net data received that we should send now(otherwise let it buffer until Uzebox checks) */
 
 			if(cu_esp_process_ipd() > 0){
-				//printf("GOT NETWORK DATA\n");
+				//print_message("GOT NETWORK DATA\n");
 				return (1<<RXC0);
 			}
 		}
 	}
-//printf("N\n");
+//print_message("N\n");
 	return 0;
 }
 
@@ -234,7 +246,7 @@ sleep(5);
 auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a UART byte */
 
 	if(esp_state.read_buf_pos_out == esp_state.read_buf_pos_in){ /* no new data? return the last byte sent */
-		printf("ESP UART: Uzebox read, but no data is buffered\n");
+		print_message("ESP UART: Uzebox read, but no data is buffered\n");
 		return esp_state.last_read_byte;
 	}
 
@@ -247,7 +259,7 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 		esp_state.last_read_byte = val; /* keep track of this, so we can send it if a byte is read but we have nothing buffered */
 	}
 
-//	printf("ESP uzebox read %d(%c), cycle %d\n", val, val, cycle);
+//	print_message("ESP uzebox read %d(%c), cycle %d\n", val, val, cycle);
 	esp_state.read_ready_cycle = WRAP32(cycle + esp_state.uart_baud_bits); /* uart_baud_bits is recalculated everytime UART flags are changed */
 
 	if(esp_state.uart_rx_enabled){ /* we need to process UART even if Uzebox wont received it, to keep timing behavior correct for network data, etc */
@@ -265,7 +277,7 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 
 void cu_esp_uzebox_modify(auint port, auint val, auint cycle){ /* host side has modified UART settings */
 
-printf("\tESP uzebox modify UART, cycle: %d, port: %d, val: %d\n", cycle, port, val);
+print_message("\tESP uzebox modify UART, cycle: %d, port: %d, val: %d\n", cycle, port, val);
 
 	if(port == CU_IO_UCSR0A){ /* UART double speed mode? */
 
@@ -303,25 +315,25 @@ printf("\tESP uzebox modify UART, cycle: %d, port: %d, val: %d\n", cycle, port, 
 	esp_state.uart_scramble = 0; /* don't scramble UART data unless there is a bad setting */
 
 	if(esp_state.uart_synchronous){ /* semi realistic? */
-		printf("\t\tESP UART broken: synchronous mode instead of asynchronous\n");
+		print_message("\t\tESP UART broken: synchronous mode instead of asynchronous\n");
 		esp_state.uart_scramble = 1;
 		esp_state.uart_tx_enabled = 0;
 		esp_state.uart_tx_enabled = 0;
 	}
 
 	if(!esp_state.uart_baud_bits || (esp_state.uart_baud_bits != esp_state.uart_baud_bits_module) || (esp_state.uart_data_bits != 8) || (esp_state.uart_stop_bits != 1) || (esp_state.uart_parity != 0)){ /* partially realistic, characters are scrambled if settings are off, framing errors are too difficult/useless to model */
-		printf("\t\tESP UART broken: faking frame errors\n");
+		print_message("\t\tESP UART broken: faking frame errors\n");
 		esp_state.uart_scramble = 1;
 	}
 
 	if(!esp_state.uart_tx_enabled || !esp_state.uart_rx_enabled){
-		printf("\t\tESP UART broken: TxE: %d, RxE: %d\n", esp_state.uart_tx_enabled, esp_state.uart_rx_enabled); 
+		print_message("\t\tESP UART broken: TxE: %d, RxE: %d\n", esp_state.uart_tx_enabled, esp_state.uart_rx_enabled); 
 	}
 
-	printf("\t\tESP UART Registers: UCSR0A=0x%02x, UCSR0C=0x%02x, UCSR0C=0x%02x\n", esp_state.uart_ucsr0a, esp_state.uart_ucsr0b, esp_state.uart_ucsr0c);
-	printf("\t\tESP UART State: Tx:%d, Rx:%d, Ubaud:%d, Ebaud:%d, Stop:%d, Parity:%d, Data:%d, Sync:%d\n", esp_state.uart_tx_enabled, esp_state.uart_rx_enabled, esp_state.uart_baud_bits, esp_state.uart_baud_bits_module, esp_state.uart_stop_bits, esp_state.uart_parity, esp_state.uart_data_bits, esp_state.uart_synchronous); 
+	print_message("\t\tESP UART Registers: UCSR0A=0x%02x, UCSR0C=0x%02x, UCSR0C=0x%02x\n", esp_state.uart_ucsr0a, esp_state.uart_ucsr0b, esp_state.uart_ucsr0c);
+	print_message("\t\tESP UART State: Tx:%d, Rx:%d, Ubaud:%d, Ebaud:%d, Stop:%d, Parity:%d, Data:%d, Sync:%d\n", esp_state.uart_tx_enabled, esp_state.uart_rx_enabled, esp_state.uart_baud_bits, esp_state.uart_baud_bits_module, esp_state.uart_stop_bits, esp_state.uart_parity, esp_state.uart_data_bits, esp_state.uart_synchronous); 
 	if(esp_state.uart_tx_enabled && esp_state.uart_rx_enabled && !esp_state.uart_scramble)
-		printf("\t\tESP ^ UART GOOD ^\n");
+		print_message("\t\tESP ^ UART GOOD ^\n");
 }
 
 
@@ -348,7 +360,7 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 			esp_state.last_cycle_tick = cycle;
 			cu_esp_reset_uart();
 			cu_esp_reset_network();
-			printf("ESP Shutdown\n");
+			print_message("ESP: Shutdown\n");
 		}/* else held reset */
 
 	}else if (!esp_state.reset_pin){ /* RST pin just got released, boot */
@@ -358,13 +370,13 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 	//	if (cu_esp_init_sockets() == ESP_SOCKET_ERROR){
 
 	//		esp_state.state &= ~ESP_INTERNET_ACCESS;
-	//		printf("ESP ERROR: failed to initialize sockets\n");
+	//		print_message("ESP ERROR: failed to initialize sockets\n");
 	//	}
 //		cu_esp_timed_stall(WRAP32(cycle + ESP_RESET_BOOT_DELAY)); /* this will delay UART output until a semi-realistic boot delay has happened */ 
 //		esp_state.wifi_timer = 1;
 //		esp_state.wifi_delay = ESP_AT_CWJAP_DELAY;
 		cu_esp_txp(start_up_string);
-		printf("ESP: Start\n");
+		print_message("ESP: Start\n");
 	}
 }
 
@@ -376,9 +388,9 @@ sint32 cu_esp_init_sockets(){
 		esp_state.winsock_enabled = 1;
 		WSADATA WSAData;
 		if (WSAStartup(MAKEWORD(2,2),&WSAData)){
-			printf("ESP ERROR: Failed for Winsock 2.2 reverting to 1.1\n");
+			print_message("ESP ERROR: Failed for Winsock 2.2 reverting to 1.1\n");
 			if (WSAStartup(MAKEWORD(1,1),&WSAData)){
-				printf("ESP ERROR: Failed on WSAStartup(): %d",cu_esp_get_last_error());
+				print_message("ESP ERROR: Failed on WSAStartup(): %d",cu_esp_get_last_error());
 				return ESP_SOCKET_ERROR;
 			}
 		}
@@ -428,7 +440,7 @@ void cu_esp_at_cwsap(sint8 *cmd_buf){ /* Get or set wifi credentials for softAP 
 		
 		}else
 			sprintf(sapbuffer,"\"%s\",\"%s\",%d,%d\r\n",esp_state.soft_ap_name,esp_state.soft_ap_pass,esp_state.soft_ap_channel,esp_state.soft_ap_encryption);
-printf("\nCWSAP:%s\n",sapbuffer);
+print_message("\nCWSAP:%s\n",sapbuffer);
 		cu_esp_txp(sapbuffer);
 		cu_esp_txp_ok();
 		return;
@@ -508,7 +520,7 @@ void cu_esp_at_cipsend(sint8 *cmd_buf){ /* Send a packet */
 
 	}else if (cmd_buf[3+7] == '\r' && cmd_buf[3+8] == '\n'){ /* Enter unvarnished transmission mode */
 //TODO MAKE SURE WE ARE CONNECTED TO SOMETHING
-printf("ESP Starting Transparent Transmission\n");
+print_message("ESP Starting Transparent Transmission\n");
 		if (0)//esp_state.cip_mode == 1)
 			cu_esp_txp_error();
 		else{
@@ -528,21 +540,21 @@ printf("ESP Starting Transparent Transmission\n");
 			connection_num = cmd_buf[3+8]-'0';
 			if (connection_num < 0 || connection_num > 3){
 				cu_esp_txp_error();
-	printf("BAD CONNECTION NUM\n");
+	print_message("BAD CONNECTION NUM\n");
 				return;
 			}
 
 		}else
-			printf("send not MUX\n");
+			print_message("send not MUX\n");
 
 		esp_state.send_to_socket = connection_num; /* Store this so we know what socket to set the payload to later */
 
 		if (!(esp_state.state & ESP_AP_CONNECTED) || (esp_state.socks[connection_num] == ESP_INVALID_SOCKET)){ /* Can't send, not connected.(What if we are acting as AP?) */
 				
 			if (!(esp_state.state & ESP_AP_CONNECTED)){
-				/*if (esp_state.debug_level > 0)	printf("Can't SEND, not connected to the AP",0); */
+				/*if (esp_state.debug_level > 0)	print_message("Can't SEND, not connected to the AP",0); */
 			}else{
-				/*if (esp_state.debug_level > 0)	printf("Can't SEND, no connection on socket:",connection_num); */
+				/*if (esp_state.debug_level > 0)	print_message("Can't SEND, no connection on socket:",connection_num); */
 			}
 			cu_esp_txp_error();
 			
@@ -550,7 +562,7 @@ printf("ESP Starting Transparent Transmission\n");
 
 		}
 
-		/* if (esp_state.debug_level > 0)	printf("CIPSEND=",0); */
+		/* if (esp_state.debug_level > 0)	print_message("CIPSEND=",0); */
 		sint8 i = cmd_buf[3+8];
 		if ( (esp_state.state & ESP_AP_CONNECTED)){ /* Must be connected to AP? or what if AP?? */
 				
@@ -558,14 +570,14 @@ printf("ESP Starting Transparent Transmission\n");
 					
 				sint32 s = cmd_buf[3+8] - '0'; /* Get the socket we will use */
 				if (!(esp_state.state & ESP_MUX) && s > 0){
-					/* if (esp_state.debug_level > 0)	printf("CIPSEND= cant use connection > 0 without MUX=1",0); */
+					/* if (esp_state.debug_level > 0)	print_message("CIPSEND= cant use connection > 0 without MUX=1",0); */
 					
 				}else{
-					/* if (esp_state.debug_level > 0)	printf("CIPSEND good connection num",s); */
+					/* if (esp_state.debug_level > 0)	print_message("CIPSEND good connection num",s); */
 				}
 
 				if (esp_state.socks[s&3] == ESP_INVALID_SOCKET){ /* Error, not connected on this socket */
-					/* if (esp_state.debug_level > 0)	printf("Cant send, not connected on socket",s); */
+					/* if (esp_state.debug_level > 0)	print_message("Cant send, not connected on socket",s); */
 
 				}else{ /* Socket is good, continue checking format */
 
@@ -581,12 +593,12 @@ printf("ESP Starting Transparent Transmission\n");
 						}
 					}
 					if (bad_format){ /* Either terminated with no length specified, or got garbage characters before "\r\n" termination */
-						/* if (esp_state.debug_level > 0)	printf("CIPSEND=Bad format",0); */
+						/* if (esp_state.debug_level > 0)	print_message("CIPSEND=Bad format",0); */
 
 					}else{ /* Format passed, get ready to receive the specified number of bytes(must be > 0) */
 
 						esp_state.rx_await_bytes = cu_esp_atoi((char *)&cmd_buf[3+10]); /* We terminated it with '\0' above */
-						/* if (esp_state.debug_level > 0)	printf("CIPSEND format good, waiting for bytes:",esp_state.rx_await_bytes); */
+						/* if (esp_state.debug_level > 0)	print_message("CIPSEND format good, waiting for bytes:",esp_state.rx_await_bytes); */
 			cmd_buf[i] = '\r'; /* Now we replace the '\0' with '\r' so this command can be removed properly */
 
 			/* TODO DO WE HAVE TO EAT THE BYTES OR JUST UPDATE THE BUFFER POS TO READ FROM?!?!?! */
@@ -602,7 +614,7 @@ printf("ESP Starting Transparent Transmission\n");
 					} /* Format passed */
 				} /* Socket is good */
 			}else{ /* Bad format */
-				/* if (esp_state.debug_level > 0)	printf("CIPSEND bad connection num",0); */
+				/* if (esp_state.debug_level > 0)	print_message("CIPSEND bad connection num",0); */
 
 			}
 		}else{ /* Not connected to AP */
@@ -615,7 +627,7 @@ printf("ESP Starting Transparent Transmission\n");
 
 
 void cu_esp_at_cwjap(sint8 *cmd_buf){ /* Join a wifi access point, fake, wont use host hardware to make this real */
-printf("ESP Join AP\n");
+print_message("ESP Join AP\n");
 	uint8 at_error = 0;
 	sint32 i;
 	if (0 && strncmp("?\r\n",(const char *)&cmd_buf[8],3)){ /* Query only */
@@ -626,7 +638,7 @@ printf("ESP Join AP\n");
 			cu_esp_txp(ap_buffer);
 		}else{
 			cu_esp_txp((const char *)"ERROR\r\n");
-printf("jap failed?!?");
+print_message("jap failed?!?");
 		}
 
 	}else{ /* Check the credentials against the fake APs */
@@ -700,7 +712,7 @@ void cu_esp_at_cwmode(sint8 *cmd_buf){
 
 		if (mt < '1' || mt > '3'){ /* Bad format */
 
-			/* if (esp_state.debug_level > 0)	printf("bad CWMODE format must be 1,2, or 3",0); */
+			/* if (esp_state.debug_level > 0)	print_message("bad CWMODE format must be 1,2, or 3",0); */
 			cu_esp_txp_error();
 			
 			return;
@@ -789,7 +801,7 @@ esp_state.state |= ESP_AP_CONNECTED | ESP_INTERNET_ACCESS;//HACK
 	uint32 off = 0;
 
 	if (esp_state.state & ESP_MUX){ /* Get the connection number and check that it is valid */
-//printf("ARE IN MUX\n");
+//print_message("ARE IN MUX\n");
 //sleep(4000);
 		if (s < '0' || s > '4' || cmd_buf[13] != ','){ /* Bad connection number or missing comma */
 			cu_esp_txp_error();
@@ -978,16 +990,21 @@ TODO*/
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	u_long block_mode = 1;
 	if (ioctlsocket(esp_state.socks[sock],FIONBIO,&block_mode)){
+
 #else
+
 	auint block_mode = 1;
 	if (ioctl(esp_state.socks[sock],FIONBIO,&block_mode)){
+
+
 /* is this better? fcntl(server_socket, F_SETFL, O_NONBLOCK); */
 /*	int ssoe = setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (void *)&enable, sizeof(enable));//allow addr reuse */
 /* 	ssoe = setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, (void *)&enable, sizeof(enable));//allow port reuse */
 /* see auto-es for other ideas... */
 #endif
-		printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error());
-		return;
+//hack disable check for Emscripten
+//		print_message("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error());
+//		return;
 	}
 	//listen(sock);
 
@@ -1024,7 +1041,7 @@ TODO*/
 
 	errno = 0;	
 	if((command_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-		printf("**ERROR** failed to create command socket, errno %d\n", errno);
+		print_message("**ERROR** failed to create command socket, errno %d\n", errno);
 		return -1;
 	}
 	fcntl(command_socket, F_SETFL, O_NONBLOCK);//make it non-blocking, so we can poll for data
@@ -1032,22 +1049,22 @@ TODO*/
 	int enable = 1;
 	int ssoe = setsockopt(command_socket, SOL_SOCKET, SO_REUSEADDR, (void *)&enable, sizeof(enable));//allow addr reuse
 	if(ssoe){
-		printf("Can't setup command reuse address option, errno %d\n", errno);
+		print_message("Can't setup command reuse address option, errno %d\n", errno);
 		return -1;
 	}
 	ssoe = setsockopt(command_socket, SOL_SOCKET, SO_REUSEPORT, (void *)&enable, sizeof(enable));//allow port reuse
 	if(ssoe){
-		printf("Can't setup command reuse port option, errno %d\n", errno);
+		print_message("Can't setup command reuse port option, errno %d\n", errno);
 		return -1;
 	}
 		
 	if(bind(command_socket, (struct sockaddr *)&command_addr_in, sizeof(command_addr_in)) == -1){
-		printf("**ERROR** command network bind() failed, errno %d\n", errno);
+		print_message("**ERROR** command network bind() failed, errno %d\n", errno);
 		return -1;
 	}
 
 	if(listen(command_socket, 10) == -1){	
-		printf("**ERROR** command network listen() failed, errno %d\n", errno);
+		print_message("**ERROR** command network listen() failed, errno %d\n", errno);
 		return -1;
 	}
 
@@ -1247,7 +1264,7 @@ void cu_esp_at_cipap(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wik
 
 	if (!strncmp((const char*)&cmd_buf[8],"?\r\n",3)){ /* Query only */
 
-		/* if (esp_state.debug_level > 0)	printf("AT+CIPAP query only\n",0); */
+		/* if (esp_state.debug_level > 0)	print_message("AT+CIPAP query only\n",0); */
 		cu_esp_timed_stall(ESP_AT_OK_DELAY);
 		cu_esp_txp("+CIPAP:");
 		cu_esp_txp((char *)esp_state.soft_ap_ip);
@@ -1427,7 +1444,7 @@ void cu_esp_at_ping(sint8 *cmd_buf){
 	pckt.hdr.un.echo.sequence = cnt++;
 	pckt.hdr.checksum = checksum(&pckt, sizeof(pckt));
 	if ( sendto(sd, &pckt, sizeof(pckt), 0, (struct sockaddr*)addr, sizeof(*addr)) <= 0 )
-		printf("ESP ERROR: ping sendto() failed: %d\n", cu_esp_get_last_error());
+		print_message("ESP ERROR: ping sendto() failed: %d\n", cu_esp_get_last_error());
 		usleep(300000);
 	}
 	return 1;
@@ -1618,7 +1635,7 @@ void cu_esp_at_ciobaud(sint8 *cmd_buf){
 
 void cu_esp_process_at(sint8 *cmd_buf){ /* this is only called after it has been determined there is something ending with \r\n, and has been string terminated */
 //return;
-printf("PROCESS AT [%s]\n", cmd_buf);
+print_message("PROCESS AT [%s]\n", cmd_buf);
 
 	if (strncmp((char*)cmd_buf, "AT+", 3)){ /* No way an AT+X command has been formed */
 
@@ -1719,7 +1736,7 @@ printf("PROCESS AT [%s]\n", cmd_buf);
 
 
 sint32 cu_esp_process_ipd(){ /* Get network data, put it to Tx(max 256 bytes at a time) */
-//printf("IPD\n");
+//print_message("IPD\n");
 	sint32 i,num_bytes;
 	num_bytes = 0;
 	for(i=0;i<4;i++){
@@ -1738,7 +1755,7 @@ esp_state.rx_packet[0] = '\0';
 		if(num_bytes == ESP_SOCKET_ERROR){ /* No data is available or socket error */
 			auint last_error = cu_esp_get_last_error();
 			if (last_error != ESP_WOULD_BLOCK && last_error != ESP_EAGAIN){ /* actual error, disconnected? */
-				printf("ESP Socket Error, terminating connection %d: %d\n", i, cu_esp_get_last_error()); 
+				print_message("ESP Socket Error, terminating connection %d: %d\n", i, cu_esp_get_last_error()); 
 				if (esp_state.state & ESP_MUX){
 					cu_esp_txp((const char*)"CLOSED ");
 					cu_esp_txi(i); /* Connection number */
@@ -1750,14 +1767,14 @@ esp_state.rx_packet[0] = '\0';
 			}
 			continue; /* otherwise not an error, there just wasn't any data yet */
 		}else if(num_bytes == 0){
-			//printf("RECEIVED 0 BYTES\n");
+			//print_message("RECEIVED 0 BYTES\n");
 			continue;
 		}
 
 		esp_state.rx_packet[num_bytes] = '\0';
-//printf("RECEIVED SOME DATA[%s] %d bytes\n", esp_state.rx_packet, num_bytes);
+//print_message("RECEIVED SOME DATA[%s] %d bytes\n", esp_state.rx_packet, num_bytes);
 		if(esp_state.user_input_mode == ESP_USER_MODE_UNVARNISHED){
-	//		printf("Got unvarnished:[%s]\n",esp_state.rx_packet);
+	//		print_message("Got unvarnished:[%s]\n",esp_state.rx_packet);
 			cu_esp_txl((const char *)esp_state.rx_packet, num_bytes);
 		}
 			
@@ -1771,7 +1788,7 @@ esp_state.rx_packet[0] = '\0';
 //		i = accept(esp_state.socks[4], 128);
 //		if (i == -1){ /* Some error, most likely nothing is trying to connect on a non-blocking socket */
 //			if (cu_esp_get_last_error() != ESP_WOULD_BLOCK){ /* It is an actual error? */
-//				printf("ESP ERROR: accept() failed, stopping server mode: %d\n", cu_esp_get_last_error());
+//				print_message("ESP ERROR: accept() failed, stopping server mode: %d\n", cu_esp_get_last_error());
 //				cu_esp_close_socket(4);
 //			}
 //		}
@@ -1792,7 +1809,7 @@ void cu_esp_save_config(){
 
 	FILE *f = fopen("esp.cfg","w");
 	if (f == NULL){ /* we always load at least once before a save, so this should have been created... */
-		printf("ESP ERROR: Can't open esp.cfg to save settings\n");
+		print_message("ESP ERROR: Can't open esp.cfg to save settings\n");
 		return;
 	}
 
@@ -1806,7 +1823,7 @@ void cu_esp_save_config(){
 	fprintf(f, "WifiIp=\"%s\"\n", esp_state.wifi_ip);
 	fprintf(f, "Baud=\"%d\"\n", esp_state.baud_rate);
 	fclose(f);
-	printf("ESP: Saved Config esp.cfg\n");
+	print_message("ESP: Saved Config esp.cfg\n");
 }
 
 
@@ -1817,7 +1834,7 @@ auint cu_esp_load_config(){
 
 	FILE *f = fopen("esp.cfg","r");
 	if (f == NULL){ /* try creating a fresh config */
-		printf("\nESP: esp.cfg settings file does not exist, using factory defaults\n");
+		print_message("\nESP: esp.cfg settings file does not exist, using factory defaults\n");
 		cu_esp_reset_factory();
 		cu_esp_save_config();
 		return 0;
@@ -1851,16 +1868,16 @@ auint cu_esp_load_config(){
 		}
 	}
 
-	printf("ESP: Loaded CFG File:\n");
-	printf("\tWifiName[%s]\n", esp_state.wifi_name);
-	printf("\tWifiPass[%s]\n", esp_state.wifi_pass);
-	printf("\tWifiMac[%s]\n", esp_state.wifi_mac);
-	printf("\tWifiIp[%s]\n", esp_state.wifi_ip);
-	printf("\tSoftApName[%s]\n", esp_state.soft_ap_name);
-	printf("\tSoftApPass[%s]\n", esp_state.soft_ap_pass);
-	printf("\tSoftApMac[%s]\n", esp_state.soft_ap_mac);
-	printf("\tSoftApIp[%s]\n", esp_state.soft_ap_ip);
-	printf("\tBaud[%d]\n", esp_state.baud_rate);
+	print_message("ESP: Loaded CFG File:\n");
+	print_message("\tWifiName[%s]\n", esp_state.wifi_name);
+	print_message("\tWifiPass[%s]\n", esp_state.wifi_pass);
+	print_message("\tWifiMac[%s]\n", esp_state.wifi_mac);
+	print_message("\tWifiIp[%s]\n", esp_state.wifi_ip);
+	print_message("\tSoftApName[%s]\n", esp_state.soft_ap_name);
+	print_message("\tSoftApPass[%s]\n", esp_state.soft_ap_pass);
+	print_message("\tSoftApMac[%s]\n", esp_state.soft_ap_mac);
+	print_message("\tSoftApIp[%s]\n", esp_state.soft_ap_ip);
+	print_message("\tBaud[%d]\n", esp_state.baud_rate);
 	fclose(f);
 	
 	return ret;
@@ -1901,21 +1918,33 @@ int inet_pton(int af, const char *src, void *dst)
 #endif
 sint32 cu_esp_net_connect(sint8 *hostname, uint32 sock, uint32 port, uint32 type){
 
-printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, sock, port, (type == ESP_PROTO_TCP ? "TCP":"UDP"));
+print_message("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, sock, port, (type == ESP_PROTO_TCP ? "TCP":"UDP"));
 
+#ifdef __EMSCRIPTEN__
+	if(!esp_state.ws_proxy_enabled){
+		bridgeSocket = emscripten_init_websocket_to_posix_socket_bridge("ws://localhost:8080");
+		// Synchronously wait until connection has been established.
+		uint16 readyState = 0;
+		do {
+			emscripten_websocket_get_ready_state(bridgeSocket, &readyState);
+			emscripten_thread_sleep(100);
+		} while (readyState == 0);
+		esp_state.ws_proxy_enabled = 1;
+	}
+#endif
 
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	LPHOSTENT hostEntry;
 	hostEntry = gethostbyname(hostname);
 	if(!hostEntry){
-		printf("ESP: gethostbyname() failed: %d\n", cu_esp_get_last_error());
+		print_message("ESP: gethostbyname() failed: %d\n", cu_esp_get_last_error());
 		return INVALID_SOCKET;
 	}
 
 	esp_state.socks[sock] = socket(AF_INET,(type & ESP_PROTO_TCP)?SOCK_STREAM:SOCK_DGRAM,(type & ESP_PROTO_TCP)?IPPROTO_TCP:0);
 
 	if(esp_state.socks[sock] == INVALID_SOCKET){
-		printf("ESP: Failed to create socket: %d\n", cu_esp_get_last_error());
+		print_message("ESP: Failed to create socket: %d\n", cu_esp_get_last_error());
 		return INVALID_SOCKET;
 	}
 
@@ -1927,17 +1956,17 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 		esp_state.socks[sock] = INVALID_SOCKET;
 
 		if(cu_esp_get_last_error() == WSAECONNREFUSED){
-			printf("ESP: Remote actively refused connection, wrong port?\n");
+			print_message("ESP: Remote actively refused connection, wrong port?\n");
 			return INVALID_SOCKET;
 		}else{
-			printf("ESP: Failed to connect, timeout or socket error: %d\n",cu_esp_get_last_error());
+			print_message("ESP: Failed to connect, timeout or socket error: %d\n",cu_esp_get_last_error());
 			return INVALID_SOCKET;
 		}
 
 		unsigned long block_mode = 1;
 		if(ioctlsocket(esp_state.socks[sock],FIONBIO,&block_mode) != NO_ERROR){
-			printf("ESP: ioctlsocket() failed to set non-blocking mode: %d\n",cu_esp_get_last_error());
-			return INVALID_SOCKET;
+			print_message("ESP: ioctlsocket() failed to set non-blocking mode: %d\n",cu_esp_get_last_error());
+//HACK disable for Emscripten			return INVALID_SOCKET;
 		}
 	}
 #else
@@ -1977,9 +2006,9 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 
 	if(rc != 0){
 
-		printf("ESP ERROR: can't find host [%s]: %d\n", (char *)hostname, (int)cu_esp_get_last_error());
+		print_message("ESP ERROR: can't find host [%s]: %d\n", (char *)hostname, (int)cu_esp_get_last_error());
 		if(rc != EAI_AGAIN)
-			printf("ESP ERROR: getaddrinfo() failed: %d\n", (int)cu_esp_get_last_error());
+			print_message("ESP ERROR: getaddrinfo() failed: %d\n", (int)cu_esp_get_last_error());
 		return -1;
 	}
 
@@ -1990,7 +2019,7 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 
 		esp_state.socks[sock] = socket(ares->ai_family, ares->ai_socktype, ares->ai_protocol);
 		if(esp_state.socks[sock] < 0){
-			printf("ESP ERROR: socket() failed: %d\n", cu_esp_get_last_error());
+			print_message("ESP ERROR: socket() failed: %d\n", cu_esp_get_last_error());
 			return -1;
 		}
 
@@ -2002,19 +2031,25 @@ printf("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hostname, 
 	}while(ares != NULL);
 
 
+//TODO THIS SEEMS TO BE THE WAY TO DO IT IN EMSCRIPTEN???!?
+//fcntl(_data->socket, F_SETFL, O_NONBLOCK);
+//https://blog.squareys.de/emscripten-sockets/
+
+
+
 #endif
 	auint block_mode = 1;
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
-	if (ioctlsocket(esp_state.socks[sock],FIONBIO,(u_long *)&block_mode) != 0){ printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); return ESP_INVALID_SOCKET; }
+	if (ioctlsocket(esp_state.socks[sock],FIONBIO,(u_long *)&block_mode) != 0){ print_message("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); /*return ESP_INVALID_SOCKET; */ } //HACK DISABLE RETURN FOR EMSCRIPTEN
 #else
-	if (ioctl(esp_state.socks[sock],FIONBIO,&block_mode) != 0){ printf("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); return ESP_INVALID_SOCKET;  }
+	if (ioctl(esp_state.socks[sock],FIONBIO,&block_mode) != 0){ print_message("ESP ERROR: failed to set non-blocking mode: %d\n", cu_esp_get_last_error()); /*return ESP_INVALID_SOCKET; */  }
 
 //	sint8 optval = 1;
 //	int optlen = sizeof(sint8);
 	/* disable Nagles Algorithm */
-//	if(setsockopt(esp_state.socks[sock],IPPROTO_TCP,TCP_NODELAY,(char *)&optval,optlen) != 0){ printf("ESP ERROR: failed to set socket option TCP_NODELAY\n"); return ESP_INVALID_SOCKET; }
+//	if(setsockopt(esp_state.socks[sock],IPPROTO_TCP,TCP_NODELAY,(char *)&optval,optlen) != 0){ print_message("ESP ERROR: failed to set socket option TCP_NODELAY\n"); return ESP_INVALID_SOCKET; }
 #endif
-	printf("ESP Connected to [%s] on connection: %d\n", hostname, sock);
+	print_message("ESP Connected to [%s] on connection: %d\n", hostname, sock);
 	return 0;
 }
 
@@ -2075,7 +2110,7 @@ sint32 cu_esp_get_last_error(){
 sint32 cu_esp_net_send(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 //buf[len] = '\0';
 
-//printf("SEND() sock: %d, buf[%s], len: %d, flags: %d\n", sock, buf, len, flags);
+//print_message("SEND() sock: %d, buf[%s], len: %d, flags: %d\n", sock, buf, len, flags);
 
 	return send(esp_state.socks[sock], buf, len, flags);
 }
@@ -2091,9 +2126,9 @@ sint32  cu_esp_net_recv(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 
 void cu_esp_net_send_unvarnished(sint8 *buf, auint len){
 //buf[len] = '\0';
-//printf("SEND UNVARNISHED[%s]\n", buf);
+//print_message("SEND UNVARNISHED[%s]\n", buf);
 	if(cu_esp_net_send(0, buf, len, 0) == ESP_SOCKET_ERROR){
-		printf("ESP ERROR cu_esp_net_send() failed: %d\n", cu_esp_get_last_error());
+		print_message("ESP ERROR cu_esp_net_send() failed: %d\n", cu_esp_get_last_error());
 	}
 
 }
@@ -2117,7 +2152,7 @@ void cu_esp_timed_stall(auint cycles){ /* TODO make this work the new way...*/
 
 	if(i == sizeof(esp_state.delay_pos)){ /* no open slots for delays? shouldn't happen, not much can be done... */
 		cu_esp_txp_error();
-		cu_esp_at_txp_bad_command();
+		cu_esp_at_bad_command();
 	}
 
 	esp_state.delay_len[i] = cycles;
@@ -2163,7 +2198,7 @@ void cu_esp_txp(const char *s){ /* Write const string to tx buf */
 void cu_esp_txl(const char *s, auint len){ /* write fixed length to tx buf */
 
 	if((esp_state.read_buf_pos_in < esp_state.read_buf_pos_out) && ((esp_state.read_buf_pos_in + len) >= esp_state.read_buf_pos_out)){ /* this data will fill the buffer? */
-		printf("<<<<BUFFER OVERFLOW>>>>\n");
+		print_message("<<<<BUFFER OVERFLOW>>>>\n");
 		esp_state.read_buf_pos_in = esp_state.read_buf_pos_out = 0UL; /* real device is unpredictable is you spam it, we just trash the buffer and send error instead of trying to model that inner state... */
 		cu_esp_txp_error();
 		return;
@@ -2200,14 +2235,14 @@ sint32 cu_esp_host_serial_start(){
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	esp_state.host_serial_port = CreateFileA((LPCSTR)esp_state.host_serial_device_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (esp_state.host_serial_port == INVALID_HANDLE_VALUE){
-		printf("ESP ERROR: Host Serial CreateFileA() failed: %u\n", (unsigned int)GetLastError());
+		print_message("ESP ERROR: Host Serial CreateFileA() failed: %u\n", (unsigned int)GetLastError());
 		return ESP_SERIAL_OPEN_ERROR;
 	}
 
 	// Flush away any bytes previously read or written.
 	BOOL success = FlushFileBuffers(esp_state.host_serial_port);
 	if (!success){
-		printf("ESP ERROR: Host Serial FlushFileBuffers() failed: %d\n", (DWORD)GetLastError());
+		print_message("ESP ERROR: Host Serial FlushFileBuffers() failed: %d\n", (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
@@ -2235,7 +2270,7 @@ sint32 cu_esp_host_serial_start(){
 	state.StopBits = ONESTOPBIT;
 	success = SetCommState(esp_state.host_serial_port, &state);
 	if (!success){
-		printf("ESP ERROR: Host Serial SetCommState() failed: %d\n", (DWORD)GetLastError());
+		print_message("ESP ERROR: Host Serial SetCommState() failed: %d\n", (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
@@ -2262,7 +2297,7 @@ sint32 cu_esp_host_serial_start(){
 		case 3500000: baud = B3500000; break;
 		case 4000000: baud = B4000000; break;
 		default:
-			printf("ESP ERROR: Host Serial baud conversion failed, [%d] is not supported\n", original_baud);
+			print_message("ESP ERROR: Host Serial baud conversion failed, [%d] is not supported\n", original_baud);
 			return ESP_SERIAL_OPEN_ERROR;
 			break;
 	}
@@ -2280,13 +2315,13 @@ sint32 cu_esp_host_serial_start(){
 	esp_state.host_serial_port = open((char *)esp_state.host_serial_device_name, O_RDWR | O_NOCTTY | O_NDELAY);
 
 	if(esp_state.host_serial_port == -1){
-		printf("ESP ERROR: Host Serial open() failed: %d\n", (int)cu_esp_get_last_error());
+		print_message("ESP ERROR: Host Serial open() failed: %d\n", (int)cu_esp_get_last_error());
 		return ESP_SERIAL_OPEN_ERROR;
 	}
 	baud = original_baud;
 #endif
 
-	printf("ESP Host Serial initialized: %s @ %d\n", esp_state.host_serial_device_name, original_baud);
+	print_message("ESP Host Serial initialized: %s @ %d\n", esp_state.host_serial_device_name, original_baud);
 
 	return 0;
 }
@@ -2302,11 +2337,11 @@ void cu_esp_host_serial_write(uint8 c){
 	BOOL success = WriteFile(esp_state.host_serial_port, &c, 1, &written, NULL);
 
 	if(!success || written != 1)
-		printf("ESP ERROR: failed to write host serial byte\n");
+		print_message("ESP ERROR: failed to write host serial byte\n");
 #else
 	ssize_t r = write(esp_state.host_serial_port, &c, 1);
 	if(r != 1){
-		printf("ESP ERROR: failed to write host serial byte\n");
+		print_message("ESP ERROR: failed to write host serial byte\n");
 	}
 #endif
 }
@@ -2317,13 +2352,13 @@ uint8 cu_esp_host_serial_read(){
 	DWORD received;
 	BOOL success = ReadFile(esp_state.host_serial_port, c, 1, &received, NULL);
 	if (!success){
-		printf("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
+		print_message("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
 		return 0;
 	}
 #else
 	ssize_t received = read(esp_state.host_serial_port, c, 1);
 	if(received == -1){
-		printf("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
+		print_message("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
 		return 0;
 	}
 #endif

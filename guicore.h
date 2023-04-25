@@ -135,3 +135,4 @@ void guicore_setcaption(const char* title);
 
 
 #endif
+

@@ -167,6 +167,9 @@ static void guicore_render_1x(uint32* dest, auint dpitch,
 */
 boole guicore_init(auint flags, const char* title)
 {
+#ifdef HEADLESS
+ goto skipwnd;
+#endif
  auint i;
  auint r;
  auint g;
@@ -305,7 +308,6 @@ boole guicore_init(auint flags, const char* title)
 #else
 
  /* Create window and its renderer */
-
  if (wndnew){
 
   guicore_window = SDL_CreateWindow(
@@ -429,7 +431,9 @@ boole guicore_init(auint flags, const char* title)
                        (g << guicore_pixfmt.gsh) |
                        (b << guicore_pixfmt.bsh);
  }
-
+#ifdef HEADLESS
+skipwnd:
+#endif
  guicore_flags = flags | GUICORE_INIT;
  return TRUE;
 
@@ -539,6 +543,9 @@ uint32 const* guicore_getpalette(void)
 */
 void guicore_update(boole drop)
 {
+#ifdef HEADLESS
+ return;
+#endif
 #ifdef USE_SDL1
 
  auint   texw;
@@ -628,6 +635,9 @@ void guicore_update(boole drop)
 */
 void guicore_setcaption(const char* title)
 {
+#ifdef HEADLESS
+ return;
+#endif
 #ifndef __EMSCRIPTEN__
 
 #ifdef USE_SDL1
@@ -642,3 +652,4 @@ void guicore_setcaption(const char* title)
 
 #endif
 }
+

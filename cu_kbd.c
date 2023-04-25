@@ -34,9 +34,9 @@
 const auint cu_kbd_scan_codes[][2] = {
  {0x0d,SDLK_TAB},
  {0x0e,SDLK_BACKQUOTE},
-/* {0x11,SDLK_LALT}, */
+ {0x11,SDLK_LALT},
  {0x12,SDLK_LSHIFT},
-/* {0x14,SDLK_LCTRL}, */
+ {0x14,SDLK_LCTRL},
  {0x15,SDLK_q},
  {0x16,SDLK_1},
  {0x1a,SDLK_z},

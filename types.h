@@ -47,7 +47,7 @@
 
 /* Macro for the message / error string output. This is used to redirect or
 ** cancel messages or errors in certain builds. */
-#if (FLAG_NOCONSOLE != 0)
+#if (FLAG_NOCONSOLE != 0) || HEADLESS
 #define print_error(...)
 #define print_message(...)
 #define print_unf(str)

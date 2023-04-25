@@ -63,6 +63,8 @@ CFLAGS+= -DUSE_SDL1
 LINKB= -lSDL
 endif
 ENABLE_VCAP=$(FLAG_VCAP)
+ENABLE_ICAP=$(FLAG_ICAP)
+ENABLE_IREP=$(FLAG_IREP)
 endif
 #
 #
@@ -78,6 +80,8 @@ CFLAGS+= -DUSE_SDL1
 LINKB= -lmingw32 -lSDLmain -lSDL -mwindows -lws2_32
 endif
 ENABLE_VCAP=$(FLAG_VCAP)
+ENABLE_ICAP=$(FLAG_ICAP)
+ENABLE_IREP=$(FLAG_IREP)
 CHCONV=chconv.exe
 BINCONV=binconv.exe
 endif
@@ -88,10 +92,14 @@ endif
 ifeq ($(TSYS),emscripten)
 OUT=cuzebox.html
 CFLAGS+= -DTARGET_EMSCRIPTEN -DUSE_SDL1 -s USE_SDL=1 -s NO_EXIT_RUNTIME=1 -s NO_DYNAMIC_EXECUTION=1
+#add stuff for websockets(requires about:config in browser: javascript.options.shared_memory true
+CFLAGS+= -lwebsocket.js -s PROXY_POSIX_SOCKETS -s USE_PTHREADS=1 -s PROXY_TO_PTHREAD=1 -s PTHREAD_POOL_SIZE=2
 ENABLE_VCAP=0
+ENABLE_ICAP=0
+ENABLE_IREP=0
 ifeq ($(FLAG_SELFCONT),0)
 ifeq ($(FLAG_NOGAMEFILE),0)
-LINKB= --preload-file gamefile.uze
+LINKB= --preload-file gamefile.uze --preload-file TELNET.DAT --preload-file DISK.CFG --preload-file CPMDISK0.DSK --preload-file CPMDISK1.DSK --preload-file CPMDISK2.DSK
 endif
 endif
 endif
@@ -133,6 +141,12 @@ endif
 ifneq ($(ENABLE_VCAP),0)
 CFLAGS+= -DENABLE_VCAP=1
 endif
+ifneq ($(ENABLE_ICAP),0)
+CFLAGS+= -DENABLE_ICAP=1
+endif
+ifneq ($(ENABLE_IREP),0)
+CFLAGS+= -DENABLE_IREP=1
+endif
 ifneq ($(FLAG_DISPLAY_GAMEONLY),0)
 CFLAGS+= -DFLAG_DISPLAY_GAMEONLY=1
 endif
@@ -167,3 +181,4 @@ endif
 
 CFSPD+= $(CFLAGS)
 CFSIZ+= $(CFLAGS)
+

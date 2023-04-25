@@ -134,7 +134,9 @@ auint           wd_interval_beg[2];
 ** work value, Index 1 is the latched value. */
 auint           wd_interval_end[2];
 
-
+#ifdef HEADLESS
+  SDL_Event qe; /* A quit event for whisper port writes to terminate program(HEADLESS only) */
+#endif
 
 /* Watchdog 16 millisecond timer base tick count */
 #define WD_16MS_BASE (458176U - 1024U)
@@ -603,12 +605,6 @@ static void  cu_avr_write_io(auint port, auint val)
 
  access_io[port] |= CU_MEM_W;
 
- if (port == 0x3A){ /* Emulator-only, whisper logging */
-   print_message("%c", cval);
- }else if (port == 0x39){
-   print_message("%02x", cval);
- }
-
  switch (port){
 
   case CU_IO_PORTA:   /* Controller inputs, SPI RAM Chip Select */
@@ -952,6 +948,11 @@ static void  cu_avr_write_io(auint port, auint val)
    }
    break;
 
+ case 0x39: /* Emulator-only, whisper logging */
+   printf("%02x", cval);
+ case 0x3A: /* Purposely printf, so it works with -DHEADLESS=1 */
+   printf("%c", cval);
+
   default:
 
    break;
@@ -996,7 +997,12 @@ static auint cu_avr_read_io(auint port)
 
    ret = cpu_state.iors[CU_IO_UCSR0A];
    break;
-
+#ifdef HEADLESS
+  case 0x3A: /* reading from first whisper port, allows program to detect if running headless */
+  qe.type = SDL_QUIT;
+  SDL_PushEvent(&qe);
+#endif
+  break;
   default:
    ret = cpu_state.iors[port];
    break;

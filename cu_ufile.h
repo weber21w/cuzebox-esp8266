@@ -40,16 +40,18 @@
 ** UzeRom header provided information
 */
 typedef struct{
- auint version;    /* Header version (always 1) */
- auint target;     /* Target UC; ATMega644 = 0 */
- auint pmemsize;   /* Occupied program memory size */
- auint year;       /* Release year */
- uint8 name[32];   /* Name of program (Zero terminated) */
- uint8 author[32]; /* Name of author (Zero terminated) */
- uint8 icon[256];  /* 16 x 16 icon using the Uzebox palette */
- auint crc32;      /* CRC of the program */
- auint mouse;      /* (??? Uses mouse ???) */
- uint8 desc[64];   /* Description (Zero terminated) */
+ auint version;     /* Header version (always 1) */
+ auint target;      /* Target UC; ATMega644 = 0 */
+ auint pmemsize;    /* Occupied program memory size */
+ auint year;        /* Release year */
+ uint8 name[32];    /* Name of program (Zero terminated) */
+ uint8 author[32];  /* Name of author (Zero terminated) */
+ uint8 icon[256];   /* 16 x 16 icon using the Uzebox palette */
+ auint crc32;       /* CRC of the program */
+ uint8 psupport;    /* Peripherals supported */
+ uint8 desc[64];    /* Description (Zero terminated) */
+ uint8 pdefault;    /* Peripherals default on(Emulator) */
+ /* uint8 reserved[113] */
 }cu_ufile_header_t;
 
 

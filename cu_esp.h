@@ -253,8 +253,10 @@ typedef struct{
 #else
 	struct sockaddr_in	sock_info[5];
 #endif
-	volatile uint32_t	busy_cycles;
 
+#ifdef __EMSCRIPTEN__
+	uint32		ws_proxy_enabled;//Emscripten only websockets bridge
+#endif
 	sint8		wifi_name[64];
 	sint8		wifi_pass[64];
 	sint8		wifi_mac[32];

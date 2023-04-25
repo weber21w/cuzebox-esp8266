@@ -266,6 +266,9 @@ static uint8 textgui_tohex(auint val)
 */
 void textgui_draw(boole nogrf)
 {
+#ifdef HEADLESS
+ //return;
+#endif
  auint          i;
  auint          j;
  auint          t;

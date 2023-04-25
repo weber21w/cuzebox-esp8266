@@ -156,6 +156,9 @@ static void ginput_gctr_loadmappings(char const* path)
 */
 void  ginput_init(void)
 {
+#ifdef HEADLESS
+ return;
+#endif
 #ifndef USE_SDL1
  auint         i;
  auint         j;

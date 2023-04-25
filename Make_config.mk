@@ -91,6 +91,18 @@ PATH_GAMECONTROLLERDB=
 FLAG_VCAP=0
 #
 #
+# Should the input capture feature be built in? Note that it is not possible
+# to have it in the Emscripten build.
+#
+FLAG_ICAP=1
+#
+#
+# Should the input replay feature be built in? Note that it is not possible
+# to have it in the Emscripten build. Requires FLAG_ICAP=1 above.
+#
+FLAG_IREP=1
+#
+#
 # Initial display: Game only (1) or show the emulator interface (0) (currently
 # memory occupation & sync signals). The F3 key may toggle it runtime.
 #
@@ -148,3 +160,9 @@ FLAG_NATIVE=0
 # except Emscripten.
 #
 FLAG_USE_SDL1=0
+#
+#
+# Should anything written to the whisper ports be printed to stdout? Setting
+# this to 1 will automatically disable all other console output.
+#
+FLAG_PRINTF_WHISPER=1
