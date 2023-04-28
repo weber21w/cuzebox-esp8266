@@ -104,8 +104,21 @@ const auint cu_kbd_scan_codes[][2] = {
  {0,0}
 };
 
-
-
+const auint cu_kbd_ext_codes[][2] = {
+ {0x69,SDLK_END},
+ {0x6b,SDLK_LEFT},
+ {0x6b,SDLK_HOME},
+ {0x70,SDLK_INSERT},
+ {0x71,SDLK_DELETE},
+ {0x72,SDLK_DOWN},
+ {0x74,SDLK_RIGHT},
+ {0x75,SDLK_UP},
+ {0x7a,SDLK_PAGEDOWN},
+ {0x7c,SDLK_PRINTSCREEN},//SDLK_PRINT
+ {0x7d,SDLK_PAGEUP},
+ {0x7e,SDLK_STOP},//SDLK_BREAK
+ {0,0}
+};
 void cu_kbd_handle_key(SDL_Event const* ev){
 
  if(cu_kbd_queue_in == cu_kbd_queue_out)
@@ -117,32 +130,44 @@ void cu_kbd_handle_key(SDL_Event const* ev){
   }
  }
 
- if(cu_kbd_queue_in > sizeof(cu_kbd_queue)-1U)
+ if(cu_kbd_queue_in > sizeof(cu_kbd_queue)-2U)/* enough space for an extended code? */
   return;
 
  uint16 i = 0;
- while(cu_kbd_scan_codes[i][1] && cu_kbd_scan_codes[i][1] != ev->key.keysym.sym)
-  i++;
+ while(cu_kbd_scan_codes[i][1] && cu_kbd_scan_codes[i][1] != ev->key.keysym.sym){i++;}
 
  if(cu_kbd_scan_codes[i][1] == ev->key.keysym.sym){/* a printable character? */
   cu_kbd_queue[cu_kbd_queue_in++] = cu_kbd_scan_codes[i][0];
+  return;
+ }
 
- }else{/* check special codes for emulator only features */
-  if(ev->type == SDL_KEYDOWN){
-   if(ev->key.keysym.sym == SDLK_LCTRL)
-    cu_kbd_held_lctrl = 1U;
-   else if(cu_kbd_held_lctrl){
-    if(ev->key.keysym.sym == SDLK_F1){ /* toggle keyboard, so emulator controls and gamepads can be used again */
-     cu_kbd_enabled = !cu_kbd_enabled;
-     cu_kbd_bypassed = 255U;
-     print_unf("Keyboard Dongle Disconnected\n");
-    }else if(ev->key.keysym.sym == SDLK_F6)
-     cu_adjust_mouse_scale(); /* change mouse scale(which can also enable/disable the mouse while in keyboard passthrough mode) */
-   }
-  }else if(ev->type == SDL_KEYUP){
-   if(ev->key.keysym.sym == SDLK_LCTRL)
-    cu_kbd_held_lctrl = 0U;
+ i = 0;
+ while(cu_kbd_ext_codes[i][1] && cu_kbd_ext_codes[i][1] != ev->key.keysym.sym){i++;}
+
+ if(cu_kbd_ext_codes[i][1] == ev->key.keysym.sym){/* an extended key? */
+  cu_kbd_queue[cu_kbd_queue_in++] = 0xe0;
+  cu_kbd_queue[cu_kbd_queue_in++] = cu_kbd_ext_codes[i][0];
+  return;
+ }
+
+ /* check special codes for emulator only features */
+ if(ev->type == SDL_KEYDOWN){
+  if(ev->key.keysym.sym == SDLK_LCTRL)
+   cu_kbd_held_lctrl = 1U;
+  else if(ev->key.keysym.sym == SDLK_UP){
+   cu_kbd_queue[cu_kbd_queue_in++] = 0xe0; 
+   cu_kbd_queue[cu_kbd_queue_in++] = 0x6b;
+  }else if(cu_kbd_held_lctrl){
+   if(ev->key.keysym.sym == SDLK_F1){ /* toggle keyboard, so emulator controls and gamepads can be used again */
+    cu_kbd_enabled = !cu_kbd_enabled;
+    cu_kbd_bypassed = 255U;
+    print_unf("Keyboard Dongle Disconnected\n");
+   }else if(ev->key.keysym.sym == SDLK_F6)
+    cu_adjust_mouse_scale(); /* change mouse scale(which can also enable/disable the mouse while in keyboard passthrough mode) */
   }
+ }else if(ev->type == SDL_KEYUP){
+  if(ev->key.keysym.sym == SDLK_LCTRL)
+   cu_kbd_held_lctrl = 0U;
  }
 }
 
@@ -220,3 +245,4 @@ auint  cu_kbd_get_enabled(void){
 void cu_kbd_set_enabled(uint8 val){
  cu_kbd_enabled = val;
 }
+
