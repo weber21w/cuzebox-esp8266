@@ -173,4 +173,4 @@ FLAG_PRINTF_WHISPER=1
 # allows a game to terminate emulation by reading 0x3A, or to enter turbo
 # mode(unlimited Uzebox cycles, primarily for Uzenet bots).
 #
-FLAG_HEADLESS=1
+FLAG_HEADLESS=0
