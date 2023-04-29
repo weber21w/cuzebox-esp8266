@@ -166,3 +166,11 @@ FLAG_USE_SDL1=0
 # this to 1 will automatically disable all other console output.
 #
 FLAG_PRINTF_WHISPER=1
+#
+#
+# Run without a window, audio, input, or console output(except whisper) for
+# use with running multiple scripted runs(Uzenet server, primarily). Also
+# allows a game to terminate emulation by reading 0x3A, or to enter turbo
+# mode(unlimited Uzebox cycles, primarily for Uzenet bots).
+#
+FLAG_HEADLESS=1
