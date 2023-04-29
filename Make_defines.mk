@@ -165,6 +165,9 @@ endif
 ifneq ($(FLAG_NATIVE),0)
 CFLAGS+= -DFLAG_NATIVE=1
 endif
+ifneq ($(FLAG_HEADLESS),0)
+CFLAGS+= -DHEADLESS=1
+endif
 
 OBD=_obj_
 
@@ -181,4 +184,3 @@ endif
 
 CFSPD+= $(CFLAGS)
 CFSIZ+= $(CFLAGS)
-
