@@ -29,12 +29,14 @@
 
 #include "cu_esp.h"
 #include "cu_types.h"
+#include "time.h"
 
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 #include <windows.h>
+//#include <winbase.h>
 	#include <winsock2.h>
 	#include <ws2tcpip.h>
-	#pragma comment (lib, "Ws2_32.lib")
+	//#pragma comment (lib, "Ws2_32.lib")
 #else /* POSIX system(Linux, OSX, etc) */
 #include <stdio.h>
 #include <sys/socket.h> //For Sockets
@@ -42,9 +44,9 @@
 #include <netinet/in.h> //For the AF_INET (Address Family)
 
 //	#include <sys/socket.h>
-	#include <sys/ioctl.h>
 //	#include <sys/types.h>
 //	#include <netinet/in.h>
+	#include <sys/ioctl.h>
 	#include <netinet/tcp.h>
 	#include <arpa/inet.h>
 	#include <netdb.h>
@@ -81,8 +83,16 @@ auint cu_esp_uzebox_write_ready(auint cycle){ /* host side checking if it can wr
 	return 0;
 }
 
+auint cu_esp_get_time_seconds(){
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+//?
+#else
+	time_t seconds = time(NULL);
+	return seconds;
+#endif
+}
 
-void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UART byte */
+void cu_esp_uzebox_write(uint8 val, auint cycle){ /* Uzebox has written a UART byte */
 
 //	print_message("ESP uzebox write %d(%c)\n", val, val);
 
@@ -93,12 +103,38 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 	if(!esp_state.uart_tx_enabled)
 		return;
 
+	if(esp_state.host_serial_bypass){
+		cu_esp_host_serial_write(val);
+		return;
+	}
+
 	//if(esp_state.uart_scramble) /* wrong UART settings? scramble the data(not modeling the nearly analog nature of real framing errors...) */
 	///	val = ((val * val) & 0b01010101);
 
 	if((esp_state.state & ESP_ECHO) && esp_state.user_input_mode < ESP_USER_MODE_UNVARNISHED){ /* should we echo the byte back? */
 		cu_esp_txp((const char *)&val);
 //print_message("ECHO [(const char *)&val]\n");
+	}
+
+	if(esp_state.uart_logging){
+		if(esp_state.uart_logging == 1){ /* human readable(large output) */
+
+			if(esp_state.uart_scramble)
+				fprintf(esp_state.uart_logging_file, "-baud mismatch-\n");
+			if(val != '\r' && val != '\n')
+				fprintf(esp_state.uart_logging_file, "%04X%04X\t>\t(%02X)'%c'\n", (cycle>>16), (cycle&0xFF), val, val);
+			else if(val == '\r')
+				fprintf(esp_state.uart_logging_file, "%04X%04X\t>\t(0D)'\\r'\n", (cycle>>16), (cycle&0xFF));
+			else
+				fprintf(esp_state.uart_logging_file, "%04X%04X\t>\t(0A)'\\n'\n", (cycle>>16), (cycle&0xFF));
+		}else if(esp_state.uart_logging == 2){ /* binary output */
+
+			fwrite(cycle, 1, sizeof(cycle), esp_state.uart_logging_file); //time stamp(does roll over)
+			fwrite(1, 1, 1, esp_state.uart_logging_file); //write
+			fwrite((val&0xFF), 1, 1, esp_state.uart_logging_file); //actual UART value received by ESP8266(written by Uzebox)
+		}else{ /* host serial output(useful for external logging) */
+
+		}
 	}
 
 	if(esp_state.user_input_mode == ESP_USER_MODE_UNVARNISHED){ /* sending time window mode? */
@@ -151,6 +187,11 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* host side has written a UAR
 
 
 auint cu_esp_update_timer_counts(auint cycle){
+
+	if(esp_state.host_serial_bypass){
+
+		return 0;
+	}
 
 	uint8 i;
 	auint tdelta;
@@ -212,13 +253,18 @@ auint cu_esp_uzebox_read_ready(auint cycle){ /* host side checking if a byte has
 
 	if(esp_state.read_ready_cycle > cycle && (esp_state.read_ready_cycle - cycle) > 100000UL){ /* rolled over? */
 	print_message("ROLLED OVER\n");
-sleep(5);
+//cu_esp_sleep(5*1000);
 		esp_state.read_ready_cycle = cycle;
 	}
 
 	if(cycle >= esp_state.read_ready_cycle){
 //print_message("R\n");
 		esp_state.read_ready_cycle = 0UL;
+
+		if(esp_state.host_serial_bypass){
+		
+			return;
+		}
 
 		auint buf_next = cu_esp_update_timer_counts(cycle);/* based on timing, get the max position we can send from */
 
@@ -245,14 +291,39 @@ sleep(5);
 
 auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a UART byte */
 
+	if(esp_state.host_serial_bypass){
+		if(cu_esp_host_serial_rx_bytes_ready()) /* host serial device has data buffered? */
+			esp_state.last_read_byte = cu_esp_host_serial_read();
+		return esp_state.last_read_byte;
+	}
+
 	if(esp_state.read_buf_pos_out == esp_state.read_buf_pos_in){ /* no new data? return the last byte sent */
 		print_message("ESP UART: Uzebox read, but no data is buffered\n");
 		return esp_state.last_read_byte;
 	}
 
+
 	auint val = esp_state.read_buf[esp_state.read_buf_pos_out++];
 	if(esp_state.read_buf_pos_out >= sizeof(esp_state.read_buf))
 		esp_state.read_buf_pos_out = 0UL;
+
+	if(esp_state.uart_logging){
+
+		if(esp_state.uart_logging == 1){
+			if(val != '\r' && val != '\n')
+				fprintf(esp_state.uart_logging_file, "%04X%04X\t<\t(%02X)'%c'\n", (cycle>>16)&0xFFFF, (cycle&0xFFFF), val, val);
+			else if(val == '\r')
+				fprintf(esp_state.uart_logging_file, "%04X%04X\t<\t(0D)'\\r'\n", (cycle>>16)&0xFFFF, (cycle&0xFFFF));
+			else
+				fprintf(esp_state.uart_logging_file, "%04X%04X\t<\t(0A)'\\n'\n", (cycle>>16)&0xFFFF, (cycle&0xFFFF));
+		}else if(esp_state.uart_logging == 2){
+			fwrite(cycle, 1, sizeof(cycle), esp_state.uart_logging_file); //time stamp(does roll over)
+			fwrite(0, 1, 1, esp_state.uart_logging_file); //read
+			fwrite((val&0xFF), 1, 1, esp_state.uart_logging_file); //actual UART value sent by ESP8266(read by Uzebox)
+		}else{
+
+		}
+	}
 
 	if(esp_state.read_buf_pos_in == esp_state.read_buf_pos_out){ /* that was the last byte ready? */
 		esp_state.read_buf_pos_in = esp_state.read_buf_pos_out = 0UL;
@@ -278,6 +349,11 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 void cu_esp_uzebox_modify(auint port, auint val, auint cycle){ /* host side has modified UART settings */
 
 print_message("\tESP uzebox modify UART, cycle: %d, port: %d, val: %d\n", cycle, port, val);
+
+	if(esp_state.host_serial_bypass){
+		
+		return;
+	}
 
 	if(port == CU_IO_UCSR0A){ /* UART double speed mode? */
 
@@ -376,7 +452,16 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 //		esp_state.wifi_timer = 1;
 //		esp_state.wifi_delay = ESP_AT_CWJAP_DELAY;
 		cu_esp_txp(start_up_string);
-		print_message("ESP: Start\n");
+		if(esp_state.emulation_model == 0)
+			print_message("ESP: Disabled\n");
+		else if(esp_state.emulation_model == 1)
+			print_message("ESP: Start[ESP8266 Mode]\n");
+		else if(esp_state.emulation_model == 2)
+			print_message("ESP: Start[ESP32 Mode]\n");
+		else
+			print_message("ESP: Start[ESP32-ETH01 Mode]\n");
+
+//		print_message("ESP: Start\n");
 	}
 }
 
@@ -407,7 +492,8 @@ void cu_esp_reset_network(){
 		esp_state.proto[i] = ESP_INVALID_SOCKET;
 	}
 
-	esp_state.ip_delay_timer = ESP_AT_IP_DELAY;
+	srand((unsigned int)cu_esp_get_time_seconds());
+	esp_state.ip_delay_timer = ESP_AT_IP_DELAY+((rand()%500)*ESP_AT_MS_DELAY);
 }
 
 
@@ -643,12 +729,9 @@ print_message("jap failed?!?");
 
 	}else{ /* Check the credentials against the fake APs */
 
-		/* TODO HACK */
-
-		cu_esp_timed_stall(ESP_AT_CWJAP_DELAY);
-		esp_state.ip_delay_timer = ESP_AT_IP_DELAY;
-		cu_esp_txp_ok();
+		esp_state.join_delay_timer = ESP_AT_CWJAP_DELAY+((rand()%1000)*ESP_AT_MS_DELAY);
 		return;
+//HACK ^
 		if (cmd_buf[3+6] != '"'){ /* Must start with '"' */
 			at_error = 1;
 		}else{
@@ -1367,37 +1450,7 @@ void cu_esp_at_rfvdd(sint8 *cmd_buf){
 }
 
 
-void cu_esp_reset_factory(){
 
-	esp_state.uart_baud_bits_module_default = ESP_FACTORY_DEFAULT_BAUD_BITS; /* 9600 baud */
-	esp_state.uart_baud_bits_module = ESP_FACTORY_DEFAULT_BAUD_BITS;
-	esp_state.baud_rate=9600UL;
-
-	memset(esp_state.soft_ap_name,'\0',sizeof(esp_state.soft_ap_name));
-	sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
-		
-	memset(esp_state.soft_ap_pass,'\0',sizeof(esp_state.soft_ap_pass));
-	sprintf((char *)esp_state.soft_ap_pass,"password");
-		
-	memset(esp_state.soft_ap_mac,'\0',sizeof(esp_state.soft_ap_mac));
-	sprintf((char *)esp_state.soft_ap_mac,"ec:44:4a:67:cb:d8");
-		
-	memset(esp_state.soft_ap_ip,'\0',sizeof(esp_state.soft_ap_ip));
-	sprintf((char *)esp_state.soft_ap_ip,"10.0.0.1");
-
-	memset(esp_state.wifi_name,'\0',sizeof(esp_state.wifi_name));
-	sprintf((char *)esp_state.wifi_name,"uzenet");
-
-	memset(esp_state.wifi_pass,'\0',sizeof(esp_state.wifi_pass));
-	sprintf((char *)esp_state.wifi_pass,"h6dkj90xghrwx89hncx59ktre61hb2k77de67v1");
-
-	memset(esp_state.wifi_mac,'\0',sizeof(esp_state.wifi_mac));
-	sprintf((char *)esp_state.wifi_mac,"60:22:32:e5:f3:85");
-
-	memset(esp_state.wifi_ip,'\0',sizeof(esp_state.wifi_ip));
-	sprintf((char *)esp_state.wifi_ip,"10.0.0.1");
-
-}
 
 
 void cu_esp_at_restore(sint8 *cmd_buf){
@@ -1613,11 +1666,11 @@ auint cu_esp_set_baud_divisor(auint new_divisor){ /* http://wormfood.net/avrbaud
 		case 76800: esp_state.baud_divisor = 22; break;
 		case 115200: esp_state.baud_divisor = 15; break;
 		case 230400: esp_state.baud_divisor = 7; break;
+		case 250000: esp_state.baud_divisor = 6; break;
 		default: return 1; break;
 	};
 	return 0;
 }
-
 
 
 void cu_esp_at_ciobaud(sint8 *cmd_buf){
@@ -1803,6 +1856,66 @@ esp_state.rx_packet[0] = '\0';
 /*                              */
 /********************************/
 
+void cu_esp_reset_factory(){
+
+	esp_state.emulation_model = 3;
+
+	esp_state.uart_baud_bits_module_default = ESP_FACTORY_DEFAULT_BAUD_BITS; /* 9600 baud */
+	esp_state.uart_baud_bits_module = ESP_FACTORY_DEFAULT_BAUD_BITS;
+	esp_state.baud_rate=9600UL;
+
+	memset(esp_state.soft_ap_name,'\0',sizeof(esp_state.soft_ap_name));
+	sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
+		
+	memset(esp_state.soft_ap_pass,'\0',sizeof(esp_state.soft_ap_pass));
+	sprintf((char *)esp_state.soft_ap_pass,"password");
+		
+	memset(esp_state.soft_ap_mac,'\0',sizeof(esp_state.soft_ap_mac));
+	sprintf((char *)esp_state.soft_ap_mac,"ec:44:4a:67:cb:d8");
+		
+	memset(esp_state.soft_ap_ip,'\0',sizeof(esp_state.soft_ap_ip));
+	sprintf((char *)esp_state.soft_ap_ip,"10.0.0.1");
+
+	memset(esp_state.wifi_name,'\0',sizeof(esp_state.wifi_name));
+	sprintf((char *)esp_state.wifi_name,"uzenet");
+
+	memset(esp_state.wifi_pass,'\0',sizeof(esp_state.wifi_pass));
+	sprintf((char *)esp_state.wifi_pass,"h6dkj90xghrwx89hncx59ktre61hb2k77de67v1");
+
+	memset(esp_state.wifi_mac,'\0',sizeof(esp_state.wifi_mac));
+	sprintf((char *)esp_state.wifi_mac,"60:22:32:e5:f3:85");
+
+	memset(esp_state.wifi_ip,'\0',sizeof(esp_state.wifi_ip));
+	sprintf((char *)esp_state.wifi_ip,"10.0.0.2");
+
+	memset(esp_state.ethernet_mac,'\0',sizeof(esp_state.ethernet_mac));
+	sprintf((char *)esp_state.ethernet_mac,"60:22:32:e5:f3:85");
+
+	memset(esp_state.ethernet_ip,'\0',sizeof(esp_state.ethernet_ip));
+	sprintf((char *)esp_state.ethernet_ip,"10.0.0.2");
+
+	memset(esp_state.bluetooth_mac,'\0',sizeof(esp_state.bluetooth_mac));
+	sprintf((char *)esp_state.bluetooth_mac,"60:22:32:e5:f3:85");
+
+	memset(esp_state.bluetooth_ip,'\0',sizeof(esp_state.bluetooth_ip));
+	sprintf((char *)esp_state.bluetooth_ip,"10.0.0.2");
+
+	memset(esp_state.uart_logging_fname,'\0',sizeof(esp_state.uart_logging_fname));
+	sprintf((char *)esp_state.uart_logging_fname,"uart-debug.dat");
+
+	memset(esp_state.uart_playback_fname,'\0',sizeof(esp_state.uart_playback_fname));
+	sprintf((char *)esp_state.uart_playback_fname,"uart-debug.dat");
+	
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	strcpy((char *)esp_state.host_serial_device_name, "COM3");
+#else
+	strcpy((char *)esp_state.host_serial_device_name, "/dev/ttyUSB0");
+#endif
+
+}
+
+
+
 void cu_esp_save_config(){
 
 	esp_state.flash_dirty = 0;
@@ -1813,15 +1926,44 @@ void cu_esp_save_config(){
 		return;
 	}
 
-	fprintf(f, "SoftApName=\"%s\"\n", esp_state.soft_ap_name);
+	fprintf(f, "Select device model(0 = disabled, 1 = ESP8266, 2 = ESP32, 3 = ESP32-ETH01)\n");
+	fprintf(f, "EmulationModel=\"%d\"\n", esp_state.emulation_model);
+
+	fprintf(f, "\nSoftApName=\"%s\"\n", esp_state.soft_ap_name);
 	fprintf(f, "SoftApPass=\"%s\"\n", esp_state.soft_ap_pass);
 	fprintf(f, "SoftApMac=\"%s\"\n", esp_state.soft_ap_mac);
 	fprintf(f, "SoftApIp=\"%s\"\n", esp_state.soft_ap_ip);
 	fprintf(f, "WifiName=\"%s\"\n", esp_state.wifi_name);
 	fprintf(f, "WifiPass=\"%s\"\n", esp_state.wifi_pass);
 	fprintf(f, "WifiMac=\"%s\"\n", esp_state.wifi_mac);
-	fprintf(f, "WifiIp=\"%s\"\n", esp_state.wifi_ip);
+	fprintf(f, "WifiIp=\"%s\"\n", esp_state.wifi_ip); /* 0.0.0.0 = DHCP */
+	fprintf(f, "EthernetMac=\"%s\"\n", esp_state.ethernet_mac);
+	fprintf(f, "EthernetIp=\"%s\"\n", esp_state.ethernet_ip); /* 0.0.0.0 = DHCP */
+	fprintf(f, "BluetoothMac=\"%s\"\n", esp_state.bluetooth_mac);
+	fprintf(f, "BluetoothIp=\"%s\"\n", esp_state.bluetooth_ip); /* 0.0.0.0 = DHCP */
+	fprintf(f, "UzenetPass=\"%s\"\n", esp_state.uzenet_pass);
 	fprintf(f, "Baud=\"%d\"\n", esp_state.baud_rate);
+
+	fprintf(f, "\n#Uart Logging Debug(0 = off, 1 = debug text file(large), 2 = binary file, 3 = Host Serial)\n");
+	fprintf(f, "UartLogging=\"%d\"\n", esp_state.uart_logging);
+	fprintf(f, "UartLoggingFile=\"%s\"\n", esp_state.uart_logging_fname);
+
+	fprintf(f, "\n#Uart Playback(0 = off, 1 = on(binary file only))\n");
+	fprintf(f, "UartPlayback=\"%d\"\n", esp_state.uart_playback);
+	fprintf(f, "UartPlaybackFile=\"%s\"\n", esp_state.uart_playback_fname);
+
+	fprintf(f, "\n#Allows you to Tx/Rx UART data between Uzebox and a device connected to a serial cable(ESP emulation disabled)\n");
+	fprintf(f, "HostSerialBypass=\"%d\"\n", esp_state.host_serial_bypass);
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+	fprintf(f, "\n#Windows(sometimes COM9 or any other number, find your COM devices with:\n"
+	fprintf(f, "#reg query HKLM\HARDWARE\DEVICEMAP\SERIALCOMM')\n"
+	fprintf(f, "#alternatively check Control Panel->Device Manager->Ports(COM & LPT)\n"
+#else
+	fprintf(f, "\n#Linux(usually /dev/ttyUSB0, find your serial devices with 'dmesg | grep tty')\n");
+	fprintf(f, "#to open a serial device without running the emulator in sudo, add your user to the dialout group:\n");
+	fprintf(f, "#sudo adduser $USER dialout\n");
+#endif
+	fprintf(f, "HostSerialDevice=\"%s\"\n", esp_state.host_serial_device_name);
 	fclose(f);
 	print_message("ESP: Saved Config esp.cfg\n");
 }
@@ -1841,13 +1983,16 @@ auint cu_esp_load_config(){
 	}
 
 	char buf[512];
+	char tmp[128];
 	while(fgets(buf, sizeof(buf), f)){ /* parse each line */
 		if(buf[strspn(buf, " ")] == '\n') /* accept blank lines */
 			continue;
 		if(buf[0] == '#') /* accept comment lines */
 			continue;
 
-		if(sscanf(buf, " SoftApName = \"%[^\"]\" ", esp_state.soft_ap_name)){
+		if(sscanf(buf, " EmulationModel = \"%u\" ", &esp_state.emulation_model)){
+			continue;
+		}else if(sscanf(buf, " SoftApName = \"%[^\"]\" ", esp_state.soft_ap_name)){
 			continue;
 		}else if(sscanf(buf, " SoftApPass = \"%[^\"]\" ", esp_state.soft_ap_pass)){
 			continue;
@@ -1863,11 +2008,45 @@ auint cu_esp_load_config(){
 			continue;
 		}else if(sscanf(buf, " WifiIp = \"%[^\"]\" ", esp_state.wifi_ip)){
 			continue;
+		}else if(sscanf(buf, " EthernetMac = \"%[^\"]\" ", esp_state.ethernet_mac)){
+			continue;
+		}else if(sscanf(buf, " EthernetIp = \"%[^\"]\" ", esp_state.ethernet_ip)){
+			continue;
+		}else if(sscanf(buf, " BluetoothMac = \"%[^\"]\" ", esp_state.bluetooth_mac)){
+			continue;
+		}else if(sscanf(buf, " BluetoothIp = \"%[^\"]\" ", esp_state.bluetooth_ip)){
+			continue;
+		}else if(sscanf(buf, " UzenetPass = \"%[^\"]\" ", esp_state.uzenet_pass)){
+			continue;
+		}else if(sscanf(buf, " UartLogging = \"%u\" ", &esp_state.uart_logging)){
+			continue;
+		}else if(sscanf(buf, " UartLoggingFile = \"%[^\"]\" ", esp_state.uart_logging_fname)){
+			continue;
+		}else if(sscanf(buf, " UartPlayback = \"%u\" ", &esp_state.uart_logging)){
+			continue;
+		}else if(sscanf(buf, " UartPlaybackFile = \"%[^\"]\" ", esp_state.uart_playback_fname)){
+			continue;
 		}else if(sscanf(buf, " Baud = \"%u\" ", &esp_state.baud_rate)){
 			continue;
+		}else if(sscanf(buf, " HostSerialBypass = \"%u\" ", &esp_state.host_serial_bypass)){
+			continue;
+		}else if(sscanf(buf, " HostSerialDevice = \"%[^\"]\" ", tmp)){ /* get the name of a hardware serial device on the host machine(OS dependent) */
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+			if(strstr(tmp, "COM") != NULL) /* ignore non-Windows entries */
+				strcpy((char *)esp_state.host_serial_device_name, tmp);
+#else
+			if(strstr(tmp, "/dev/") != NULL) /* ignore non-Linux entries */
+				strcpy((char *)esp_state.host_serial_device_name, tmp);
+#endif
+			continue;
+
 		}
 	}
 
+	if(esp_state.uart_logging && esp_state.uart_logging < 3 && esp_state.uart_playback){ /* can still playback a file with output to Host Serial for debugging */
+		esp_state.uart_logging = 0;
+		print_message("***UART Logging disabled due to UART file playback[%s]\n", esp_state.uart_logging_fname);
+	}
 	print_message("ESP: Loaded CFG File:\n");
 	print_message("\tWifiName[%s]\n", esp_state.wifi_name);
 	print_message("\tWifiPass[%s]\n", esp_state.wifi_pass);
@@ -1877,8 +2056,58 @@ auint cu_esp_load_config(){
 	print_message("\tSoftApPass[%s]\n", esp_state.soft_ap_pass);
 	print_message("\tSoftApMac[%s]\n", esp_state.soft_ap_mac);
 	print_message("\tSoftApIp[%s]\n", esp_state.soft_ap_ip);
+	print_message("\tEthernetMac[%s]\n", esp_state.ethernet_mac);
+	print_message("\tEthernetIp[%s]\n", esp_state.ethernet_ip);
+	print_message("\tBluetoothMac[%s]\n", esp_state.bluetooth_mac);
+	print_message("\tBluetoothIp[%s]\n", esp_state.bluetooth_ip);
 	print_message("\tBaud[%d]\n", esp_state.baud_rate);
+	print_message("\tUartLogging[%d]\n", esp_state.uart_logging);
+	print_message("\tUartLoggingFile[%s]\n", esp_state.uart_logging_fname);
+	print_message("\tUartPlayback[%d]\n", esp_state.uart_playback);
+	print_message("\tUartPlaybackFile[%s]\n", esp_state.uart_playback_fname);
+	print_message("\tHostSerialBypass[%d]\n", esp_state.host_serial_bypass);
+	print_message("\tHostSerialDevice[%s]\n", esp_state.host_serial_device_name);
 	fclose(f);
+
+
+	if(esp_state.host_serial_bypass){
+		if(cu_esp_host_serial_start())
+			esp_state.host_serial_bypass = 0; /* stop logging to serial if the open failed */
+		else
+			print_message("ESP Opened Host Serial Device [%s] for bypass\n", esp_state.host_serial_device_name);
+	}
+	//only open a log or playback file once per system reset(user code will commonly reset the module 1 or more times, the timing is based on the CPU)
+	if(!esp_state.uart_logging_started && esp_state.uart_logging && esp_state.uart_logging < 3){ /* logging output */
+
+		esp_state.uart_logging_started = 1;
+		if(esp_state.uart_logging == 1) /* text mode(large) */
+			esp_state.uart_logging_file = fopen(esp_state.uart_logging_fname, "w");
+		else if(esp_state.uart_logging == 2){ /* binary mode */
+			esp_state.uart_logging_file = fopen(esp_state.uart_logging_fname, "wb");
+		}else if(!esp_state.host_serial_bypass){ /* host serial output */
+			if(cu_esp_host_serial_start())
+				esp_state.uart_logging = 0; /* stop logging to serial if the open failed */
+			else
+				print_message("ESP Opened Host Serial Device [%s] for logging\n", esp_state.host_serial_device_name);
+		}
+
+		if(esp_state.uart_logging < 3 && esp_state.uart_logging_file == NULL){ /* failed to open file for write? */
+			print_message("ESP ERROR: failed to open [%s] for UART logging\n", esp_state.uart_logging_fname);
+			esp_state.uart_logging = 0;
+		}else if(esp_state.uart_logging < 3 && esp_state.uart_logging_file != NULL){ /* succeeded on opening for write? */
+			print_message("ESP UART logging started [%d][%s]\n", esp_state.uart_logging, esp_state.uart_logging_fname);
+		}
+	}else if(!esp_state.uart_playback_started && esp_state.uart_playback){ /* playback input(binary file only) */
+
+		esp_state.uart_playback_started = 1;
+		esp_state.uart_playback_file = fopen(esp_state.uart_playback_file, "rb");
+		if(esp_state.uart_playback_file == NULL){ /* failed to open file for read? */
+			print_message("ESP ERROR: failed to open [%s] for UART playback\n", esp_state.uart_playback_fname);
+			esp_state.uart_playback = 0;
+		}else
+			print_message("ESP UART playback started [%s]\n", esp_state.uart_playback_fname);
+			
+	}
 	
 	return ret;
 }
@@ -1935,7 +2164,7 @@ print_message("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hos
 
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	LPHOSTENT hostEntry;
-	hostEntry = gethostbyname(hostname);
+	hostEntry = gethostbyname((char *)hostname);
 	if(!hostEntry){
 		print_message("ESP: gethostbyname() failed: %d\n", cu_esp_get_last_error());
 		return INVALID_SOCKET;
@@ -2112,7 +2341,7 @@ sint32 cu_esp_net_send(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 
 //print_message("SEND() sock: %d, buf[%s], len: %d, flags: %d\n", sock, buf, len, flags);
 
-	return send(esp_state.socks[sock], buf, len, flags);
+	return send(esp_state.socks[sock], (char *)buf, len, flags);
 }
 
 
@@ -2120,7 +2349,7 @@ sint32 cu_esp_net_send(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 sint32  cu_esp_net_recv(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 /* TODO HANDLE UDP */
 
-	return recv(esp_state.socks[sock], buf, sizeof(esp_state.rx_packet), 0);
+	return recv(esp_state.socks[sock], (char *)buf, sizeof(esp_state.rx_packet), 0);
 }
 
 
@@ -2242,7 +2471,7 @@ sint32 cu_esp_host_serial_start(){
 	// Flush away any bytes previously read or written.
 	BOOL success = FlushFileBuffers(esp_state.host_serial_port);
 	if (!success){
-		print_message("ESP ERROR: Host Serial FlushFileBuffers() failed: %d\n", (DWORD)GetLastError());
+		print_message("ESP ERROR: Host Serial FlushFileBuffers() failed: %lu\n", (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
@@ -2256,7 +2485,7 @@ sint32 cu_esp_host_serial_start(){
 
 	success = SetCommTimeouts(esp_state.host_serial_port, &timeouts);
 	if (!success){
-		print_error("ESP ERROR: Host Serial SetCommTimeouts(): %d\n", (DWORD)GetLastError());
+		print_error("ESP ERROR: Host Serial SetCommTimeouts(): %lu\n", (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
@@ -2270,7 +2499,7 @@ sint32 cu_esp_host_serial_start(){
 	state.StopBits = ONESTOPBIT;
 	success = SetCommState(esp_state.host_serial_port, &state);
 	if (!success){
-		print_message("ESP ERROR: Host Serial SetCommState() failed: %d\n", (DWORD)GetLastError());
+		print_message("ESP ERROR: Host Serial SetCommState() for [%s] failed: %lu\n", esp_state.host_serial_device_name, (DWORD)GetLastError());
 		CloseHandle(esp_state.host_serial_port);
 		return ESP_SERIAL_OPEN_ERROR;
 	}
@@ -2293,9 +2522,6 @@ sint32 cu_esp_host_serial_start(){
 		case 1500000: baud = B1500000; break;
 		case 2000000: baud = B2000000; break;
 		case 2500000: baud = B2500000; break;
-		case 3000000: baud = B3000000; break;
-		case 3500000: baud = B3500000; break;
-		case 4000000: baud = B4000000; break;
 		default:
 			print_message("ESP ERROR: Host Serial baud conversion failed, [%d] is not supported\n", original_baud);
 			return ESP_SERIAL_OPEN_ERROR;
@@ -2315,13 +2541,13 @@ sint32 cu_esp_host_serial_start(){
 	esp_state.host_serial_port = open((char *)esp_state.host_serial_device_name, O_RDWR | O_NOCTTY | O_NDELAY);
 
 	if(esp_state.host_serial_port == -1){
-		print_message("ESP ERROR: Host Serial open() failed: %d\n", (int)cu_esp_get_last_error());
+		print_message("ESP ERROR: Host Serial open() for [%s] failed: %d\n", esp_state.host_serial_device_name, (int)cu_esp_get_last_error());
 		return ESP_SERIAL_OPEN_ERROR;
 	}
 	baud = original_baud;
 #endif
 
-	print_message("ESP Host Serial initialized: %s @ %d\n", esp_state.host_serial_device_name, original_baud);
+	print_message("ESP Host Serial initialized: [%s] @ %d\n", esp_state.host_serial_device_name, original_baud);
 
 	return 0;
 }
@@ -2332,6 +2558,7 @@ void cu_esp_host_serial_end(){
 }
 
 void cu_esp_host_serial_write(uint8 c){
+printf("WROTE HOST BYTE [%c]\n", c);
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	DWORD written;
 	BOOL success = WriteFile(esp_state.host_serial_port, &c, 1, &written, NULL);
@@ -2363,5 +2590,29 @@ uint8 cu_esp_host_serial_read(){
 	}
 #endif
 	//return received;
-	return 0;
+printf("WROTE HOST BYTE [%c]\n", c[0]);
+	return c;
+}
+
+auint cu_esp_host_serial_rx_bytes_ready(){ /* this is inefficient, should just try to read a byte, buffer and flag if it's pre-read, then serve it next... */
+printf("CHECKED HOST SERIAL RX READY\n");
+return 1;
+#if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
+/*	long nbytes;
+	ioctl(esp_state.host_serial_port, FIONREAD, &nbytes);
+	return (nbytes > 0);
+*/
+	COMSTAT comstat;
+	DWORD dwError = 0;
+	ClearCommError(port->m_hComm, &dwError, &comstat);
+	return (comstat.cbInQue > 0);
+#else
+	int nbytes;
+	ioctl(esp_state.host_serial_port, FIONREAD, &nbytes);
+if(nbytes < 1)
+printf("no host serial byte\n");
+else
+printf("GOT HOST SERIAL BYTE********\n");
+	return (nbytes > 0);
+#endif
 }

@@ -187,7 +187,7 @@ typedef struct{
 
 
 
-
+	auint		emulation_model;//0 = disabled, 1 = ESP8266, 2 = ESP32, 3 = ESP32-ETH01
 
 	auint		user_input_mode;//AT, send mode(awaiting predetermined bytes), unvarnished(awaiting predetermined time period)
 	auint		baud_rate;//actual numerical baud value(ie. 115200)
@@ -225,13 +225,24 @@ typedef struct{
 
 	auint		uart_baud_bits_module_default; /* the value to use after a module reset */
 
+	uint32		uart_logging;
+	uint32		uart_logging_started;
+	FILE		*uart_logging_file;
+	sint8		uart_logging_fname[64];
+
+	uint32		uart_playback;
+	uint32		uart_playback_started;
+	FILE		*uart_playback_file;
+	sint8		uart_playback_fname[64];
+
+	uint32		host_serial_bypass;
 	sint8		host_serial_device_name[256];
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	HANDLE		host_serial_port;
 #else
 	sint32		host_serial_port;
 #endif
-	sint8		*host_serial_dev;
+//	sint8		host_serial_dev[32];
 	uint8		host_serial_enabled;
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	auint		winsock_enabled;
@@ -262,6 +273,12 @@ typedef struct{
 	sint8		wifi_mac[32];
 	sint8		wifi_ip[24];
 
+	sint8		ethernet_mac[32];
+	sint8		ethernet_ip[24];
+
+	sint8		bluetooth_mac[32];
+	sint8		bluetooth_ip[24];
+
 	sint8		soft_ap_name[64];
 	sint8		soft_ap_pass[64];
 	sint8		soft_ap_mac[32];
@@ -275,6 +292,8 @@ typedef struct{
 
 	sint8		station_mac[32];//todo
 	sint8		station_ip[24];
+
+	sint8		uzenet_pass[16];
 
 }cu_state_esp_t;
 
@@ -427,5 +446,6 @@ sint32 cu_esp_host_serial_start();
 void cu_esp_host_serial_end();
 void cu_esp_host_serial_write(uint8 c);
 uint8 cu_esp_host_serial_read();
-
+auint cu_esp_host_serial_rx_bytes_ready();
+auint cu_esp_get_time_seconds();
 #endif
