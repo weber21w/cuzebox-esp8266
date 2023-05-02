@@ -72,7 +72,10 @@ static EMSCRIPTEN_WEBSOCKET_T bridgeSocket = 0;
 static cu_state_esp_t esp_state;
 
 
-auint cu_esp_uzebox_write_ready(auint cycle){ /* host side checking if it can write */
+auint cu_esp_uzebox_write_ready(auint cycle){ /* host side checking if it can write(calculate cycles even if ESP emulation is disabled) */
+
+	if(!esp_state.uart_tx_enabled)
+		return 0;
 
 	if(cycle >= esp_state.write_ready_cycle){
 		esp_state.write_ready_cycle = 0UL;
@@ -92,21 +95,24 @@ auint cu_esp_get_time_seconds(){
 #endif
 }
 
-void cu_esp_uzebox_write(uint8 val, auint cycle){ /* Uzebox has written a UART byte */
+void cu_esp_uzebox_write(uint8 val, auint cycle){ /* Uzebox has written a UART byte(calculate cycles even if ESP emulation is disabled) */
 
 //	print_message("ESP uzebox write %d(%c)\n", val, val);
-
-	/* need to set a delay until a write can happen again */
-	esp_state.write_ready_cycle = WRAP32(cycle + esp_state.uart_baud_bits); /* uart_baud_bits is recalculated everytime UART flags are changed */
-	esp_state.write_buf[esp_state.write_buf_pos_in++] = val;
-
 	if(!esp_state.uart_tx_enabled)
 		return;
 
-	if(esp_state.host_serial_bypass){
+	/* need to set a delay until a write can happen again */
+	esp_state.write_ready_cycle = WRAP32(cycle + esp_state.uart_baud_bits); /* uart_baud_bits is recalculated everytime UART flags are changed */
+
+	if(esp_state.host_serial_bypass)
 		cu_esp_host_serial_write(val);
+
+	if(esp_state.emulation_model)
+		esp_state.write_buf[esp_state.write_buf_pos_in++] = val;
+	else
 		return;
-	}
+
+
 
 	//if(esp_state.uart_scramble) /* wrong UART settings? scramble the data(not modeling the nearly analog nature of real framing errors...) */
 	///	val = ((val * val) & 0b01010101);
@@ -116,35 +122,44 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* Uzebox has written a UART b
 //print_message("ECHO [(const char *)&val]\n");
 	}
 
+
 	if(esp_state.uart_logging){
-		if(esp_state.uart_logging == 1){ /* human readable(large output) */
 
-			if(esp_state.uart_scramble)
-				fprintf(esp_state.uart_logging_file, "-baud mismatch-\n");
-			if(val != '\r' && val != '\n')
-				fprintf(esp_state.uart_logging_file, "%04X%04X\t>\t(%02X)'%c'\n", (cycle>>16), (cycle&0xFF), val, val);
-			else if(val == '\r')
-				fprintf(esp_state.uart_logging_file, "%04X%04X\t>\t(0D)'\\r'\n", (cycle>>16), (cycle&0xFF));
-			else
-				fprintf(esp_state.uart_logging_file, "%04X%04X\t>\t(0A)'\\n'\n", (cycle>>16), (cycle&0xFF));
-		}else if(esp_state.uart_logging == 2){ /* binary output */
-
-			fwrite(cycle, 1, sizeof(cycle), esp_state.uart_logging_file); //time stamp(does roll over)
-			fwrite(1, 1, 1, esp_state.uart_logging_file); //write
-			fwrite((val&0xFF), 1, 1, esp_state.uart_logging_file); //actual UART value received by ESP8266(written by Uzebox)
+		if(esp_state.uart_logging == 1){ /* binary output */
+//			if(esp_state.uart_scramble)
+//				fprintf(esp_state.uart_logging_file, "-baud mismatch-\n");
+			fwrite(&cycle, 1, sizeof(cycle), esp_state.uart_logging_file); //time stamp(does roll over)
+			fputc(1, esp_state.uart_logging_file); //write
+			fputc((val&0xFF), esp_state.uart_logging_file); //actual UART value received by ESP8266(written by Uzebox)
 		}else{ /* host serial output(useful for external logging) */
 
 		}
 	}
 
 	if(esp_state.user_input_mode == ESP_USER_MODE_UNVARNISHED){ /* sending time window mode? */
+		if(val != '+'){
+			esp_state.last_plus = 0; /* TODO edge case... */
+			esp_state.num_plus = 0;
+		}else{
+			esp_state.last_plus = cycle;
+			if(++esp_state.num_plus == 3){ /* TODO HUGE HACK */
+				printf("ESP BROKE OUT OF TRANSPARENT MODE\n");
+				esp_state.user_input_mode = ESP_USER_MODE_AT;
+			}
 
+		}
+printf("[%c]\n", val);
 		esp_state.unvarnished_bytes++; /* keep track of how many bytes to send out, once the timing window closes */
+		if(esp_state.unvarnished_bytes == 1){ /* first byte, start the timing window from here(TODO this is how the hardware actually does it? 50Hz max..or less) */
+			esp_state.unvarnished_end_cycle = WRAP32(cycle + ESP_UNVARNISHED_DELAY);
+		}else /* not the first byte, see if it's time to send */
+{
 		if(cycle < esp_state.unvarnished_end_cycle && (esp_state.unvarnished_end_cycle - cycle) > 100000UL) /* rolled over? */
 			esp_state.unvarnished_end_cycle = cycle;
 
+//TODO TODO DONT DO THE TIMING HERE, DO IT IN UPDATETIMERS()!!!!!!!!!!!!!!!!!
 		if(cycle >= esp_state.unvarnished_end_cycle){ /* time to send data? */
-
+printf("------\n");
 			if(esp_state.unvarnished_bytes == 3){ /* check special case */
 				if(esp_state.write_buf[0] == '+' && esp_state.write_buf[1] == '+' && esp_state.write_buf[2] == '+'){/* single timing window containing only "+++"?, then break out of unvarnished mode */
 					print_message("ESP Broke out of transparent/unvarnished mode\n");
@@ -159,6 +174,7 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* Uzebox has written a UART b
 		}else{
 			print_message("WAIT UNVARNISHED\n");
 		}
+}
 
 	}else if(esp_state.user_input_mode == ESP_USER_MODE_SEND){ /* send fixed length mode(prefixed with send command)? */
 		esp_state.remaining_send_bytes--;
@@ -191,6 +207,30 @@ auint cu_esp_update_timer_counts(auint cycle){
 	if(esp_state.host_serial_bypass){
 
 		return 0;
+	}
+
+	if(esp_state.user_input_mode == ESP_USER_MODE_UNVARNISHED && cycle >= esp_state.unvarnished_end_cycle){ /* time to send data? */
+		if(cycle < esp_state.unvarnished_end_cycle && (esp_state.unvarnished_end_cycle - cycle) > 100000UL) /* rolled over? */
+			esp_state.unvarnished_end_cycle = cycle;
+
+//TODO TODO DONT DO THE TIMING HERE, DO IT IN UPDATETIMERS()!!!!!!!!!!!!!!!!!
+		if(cycle >= esp_state.unvarnished_end_cycle){ /* time to send data? */
+printf("------\n");
+			if(esp_state.unvarnished_bytes == 3){ /* check special case */
+				if(esp_state.write_buf[0] == '+' && esp_state.write_buf[1] == '+' && esp_state.write_buf[2] == '+'){/* single timing window containing only "+++"?, then break out of unvarnished mode */
+					print_message("ESP Broke out of transparent/unvarnished mode\n");
+					esp_state.user_input_mode = ESP_USER_MODE_AT;
+					return 0;
+				}
+			}
+			esp_state.unvarnished_end_cycle = WRAP32(cycle + ESP_UNVARNISHED_DELAY); /* set next end event */
+			cu_esp_net_send_unvarnished(esp_state.write_buf, esp_state.unvarnished_bytes);
+			esp_state.write_buf_pos_in = 0;
+			esp_state.unvarnished_bytes = 0;
+		}else{
+			print_message("WAIT UNVARNISHED\n");
+		}
+
 	}
 
 	uint8 i;
@@ -263,7 +303,7 @@ auint cu_esp_uzebox_read_ready(auint cycle){ /* host side checking if a byte has
 
 		if(esp_state.host_serial_bypass){
 		
-			return;
+			return (cu_esp_host_serial_rx_bytes_ready() ? (1<<RXC0):0);
 		}
 
 		auint buf_next = cu_esp_update_timer_counts(cycle);/* based on timing, get the max position we can send from */
@@ -297,6 +337,9 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 		return esp_state.last_read_byte;
 	}
 
+	if(!esp_state.emulation_model)
+		return esp_state.last_read_byte;
+
 	if(esp_state.read_buf_pos_out == esp_state.read_buf_pos_in){ /* no new data? return the last byte sent */
 		print_message("ESP UART: Uzebox read, but no data is buffered\n");
 		return esp_state.last_read_byte;
@@ -310,16 +353,10 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 	if(esp_state.uart_logging){
 
 		if(esp_state.uart_logging == 1){
-			if(val != '\r' && val != '\n')
-				fprintf(esp_state.uart_logging_file, "%04X%04X\t<\t(%02X)'%c'\n", (cycle>>16)&0xFFFF, (cycle&0xFFFF), val, val);
-			else if(val == '\r')
-				fprintf(esp_state.uart_logging_file, "%04X%04X\t<\t(0D)'\\r'\n", (cycle>>16)&0xFFFF, (cycle&0xFFFF));
-			else
-				fprintf(esp_state.uart_logging_file, "%04X%04X\t<\t(0A)'\\n'\n", (cycle>>16)&0xFFFF, (cycle&0xFFFF));
-		}else if(esp_state.uart_logging == 2){
-			fwrite(cycle, 1, sizeof(cycle), esp_state.uart_logging_file); //time stamp(does roll over)
-			fwrite(0, 1, 1, esp_state.uart_logging_file); //read
-			fwrite((val&0xFF), 1, 1, esp_state.uart_logging_file); //actual UART value sent by ESP8266(read by Uzebox)
+
+			fwrite(&cycle, 1, sizeof(cycle), esp_state.uart_logging_file); //time stamp(does roll over)
+			fputc(0, esp_state.uart_logging_file); //read
+			fputc((val&0xFF), esp_state.uart_logging_file); //actual UART value sent by ESP8266(read by Uzebox)
 		}else{
 
 		}
@@ -468,6 +505,9 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 
 sint32 cu_esp_init_sockets(){
 
+	if(!esp_state.emulation_model)
+		return 0;
+
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	if(!esp_state.winsock_enabled){ /* this only needs to be done once per program run */
 		esp_state.winsock_enabled = 1;
@@ -486,6 +526,10 @@ sint32 cu_esp_init_sockets(){
 }
 
 void cu_esp_reset_network(){
+
+	if(!esp_state.emulation_model)
+		return;
+
 	cu_esp_init_sockets(); /* prepare sockets, if necessary(winsock) */
 	for (sint32 i=0;i<4;i++){
 		esp_state.socks[i] = ESP_INVALID_SOCKET;
@@ -1858,11 +1902,11 @@ esp_state.rx_packet[0] = '\0';
 
 void cu_esp_reset_factory(){
 
-	esp_state.emulation_model = 3;
-
 	esp_state.uart_baud_bits_module_default = ESP_FACTORY_DEFAULT_BAUD_BITS; /* 9600 baud */
 	esp_state.uart_baud_bits_module = ESP_FACTORY_DEFAULT_BAUD_BITS;
 	esp_state.baud_rate=9600UL;
+	esp_state.uart_logging = 0;
+	esp_state.emulation_model = 3;
 
 	memset(esp_state.soft_ap_name,'\0',sizeof(esp_state.soft_ap_name));
 	sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
@@ -1944,11 +1988,11 @@ void cu_esp_save_config(){
 	fprintf(f, "UzenetPass=\"%s\"\n", esp_state.uzenet_pass);
 	fprintf(f, "Baud=\"%d\"\n", esp_state.baud_rate);
 
-	fprintf(f, "\n#Uart Logging Debug(0 = off, 1 = debug text file(large), 2 = binary file, 3 = Host Serial)\n");
+	fprintf(f, "\n#Uart Logging Debug(0 = off, 1 = binary file, 2 = Host Serial)\n");
 	fprintf(f, "UartLogging=\"%d\"\n", esp_state.uart_logging);
 	fprintf(f, "UartLoggingFile=\"%s\"\n", esp_state.uart_logging_fname);
 
-	fprintf(f, "\n#Uart Playback(0 = off, 1 = on(binary file only))\n");
+	fprintf(f, "\n#Uart Playback(0 = off, 1 = on)\n");
 	fprintf(f, "UartPlayback=\"%d\"\n", esp_state.uart_playback);
 	fprintf(f, "UartPlaybackFile=\"%s\"\n", esp_state.uart_playback_fname);
 
@@ -2043,11 +2087,23 @@ auint cu_esp_load_config(){
 		}
 	}
 
-	if(esp_state.uart_logging && esp_state.uart_logging < 3 && esp_state.uart_playback){ /* can still playback a file with output to Host Serial for debugging */
+	if(esp_state.uart_logging && esp_state.uart_logging < 2 && esp_state.uart_playback){ /* can still playback a file with output to Host Serial for debugging */
 		esp_state.uart_logging = 0;
 		print_message("***UART Logging disabled due to UART file playback[%s]\n", esp_state.uart_logging_fname);
 	}
+
 	print_message("ESP: Loaded CFG File:\n");
+	
+	char emu_mod[32];
+	if(esp_state.emulation_model == 0)
+		sprintf(emu_mod, "disabled");
+	else if(esp_state.emulation_model == 1)
+		sprintf(emu_mod, "ESP8266");
+	else if(esp_state.emulation_model == 2)
+		sprintf(emu_mod, "ESP32");
+	else
+		sprintf(emu_mod, "ESP32-ETH01");
+	print_message("\tEmulationModel[%d=%s]\n", esp_state.emulation_model, emu_mod);
 	print_message("\tWifiName[%s]\n", esp_state.wifi_name);
 	print_message("\tWifiPass[%s]\n", esp_state.wifi_pass);
 	print_message("\tWifiMac[%s]\n", esp_state.wifi_mac);
@@ -2069,7 +2125,6 @@ auint cu_esp_load_config(){
 	print_message("\tHostSerialDevice[%s]\n", esp_state.host_serial_device_name);
 	fclose(f);
 
-
 	if(esp_state.host_serial_bypass){
 		if(cu_esp_host_serial_start())
 			esp_state.host_serial_bypass = 0; /* stop logging to serial if the open failed */
@@ -2081,9 +2136,9 @@ auint cu_esp_load_config(){
 
 		esp_state.uart_logging_started = 1;
 		if(esp_state.uart_logging == 1) /* text mode(large) */
-			esp_state.uart_logging_file = fopen(esp_state.uart_logging_fname, "w");
+			esp_state.uart_logging_file = fopen((char *)esp_state.uart_logging_fname, "w");
 		else if(esp_state.uart_logging == 2){ /* binary mode */
-			esp_state.uart_logging_file = fopen(esp_state.uart_logging_fname, "wb");
+			esp_state.uart_logging_file = fopen((char *)esp_state.uart_logging_fname, "wb");
 		}else if(!esp_state.host_serial_bypass){ /* host serial output */
 			if(cu_esp_host_serial_start())
 				esp_state.uart_logging = 0; /* stop logging to serial if the open failed */
@@ -2100,7 +2155,7 @@ auint cu_esp_load_config(){
 	}else if(!esp_state.uart_playback_started && esp_state.uart_playback){ /* playback input(binary file only) */
 
 		esp_state.uart_playback_started = 1;
-		esp_state.uart_playback_file = fopen(esp_state.uart_playback_file, "rb");
+		esp_state.uart_playback_file = fopen((char *)esp_state.uart_playback_fname, "rb");
 		if(esp_state.uart_playback_file == NULL){ /* failed to open file for read? */
 			print_message("ESP ERROR: failed to open [%s] for UART playback\n", esp_state.uart_playback_fname);
 			esp_state.uart_playback = 0;
@@ -2591,7 +2646,7 @@ uint8 cu_esp_host_serial_read(){
 #endif
 	//return received;
 printf("WROTE HOST BYTE [%c]\n", c[0]);
-	return c;
+	return c[0];
 }
 
 auint cu_esp_host_serial_rx_bytes_ready(){ /* this is inefficient, should just try to read a byte, buffer and flag if it's pre-read, then serve it next... */

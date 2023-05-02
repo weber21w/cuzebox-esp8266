@@ -115,7 +115,7 @@
 #define	ESP_AT_CWLAP_INTER_DELAY		6UL*ESP_AT_MS_DELAY
 #define	ESP_AT_CWJAP_DELAY			1800UL*ESP_AT_MS_DELAY
 #define	ESP_AT_IP_DELAY			100UL*ESP_AT_MS_DELAY
-#define	ESP_UNVARNISHED_DELAY			20UL*ESP_AT_MS_DELAY
+#define	ESP_UNVARNISHED_DELAY			20UL*ESP_AT_MS_DELAY*3//HACK why 3x?
 #define	ESP_AT_RST_DELAY			ESP_AT_OK_DELAY
 
 #define ESP_SOCKET_ERROR		-1
@@ -229,6 +229,9 @@ typedef struct{
 	uint32		uart_logging_started;
 	FILE		*uart_logging_file;
 	sint8		uart_logging_fname[64];
+
+	auint		last_plus;
+	auint		num_plus;
 
 	uint32		uart_playback;
 	uint32		uart_playback_started;
