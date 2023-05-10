@@ -89,6 +89,7 @@ auint cu_esp_uzebox_write_ready(auint cycle){ /* host side checking if it can wr
 auint cu_esp_get_time_seconds(){
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 //?
+	return 0;
 #else
 	time_t seconds = time(NULL);
 	return seconds;
@@ -1999,9 +2000,9 @@ void cu_esp_save_config(){
 	fprintf(f, "\n#Allows you to Tx/Rx UART data between Uzebox and a device connected to a serial cable(ESP emulation disabled)\n");
 	fprintf(f, "HostSerialBypass=\"%d\"\n", esp_state.host_serial_bypass);
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
-	fprintf(f, "\n#Windows(sometimes COM9 or any other number, find your COM devices with:\n"
-	fprintf(f, "#reg query HKLM\HARDWARE\DEVICEMAP\SERIALCOMM')\n"
-	fprintf(f, "#alternatively check Control Panel->Device Manager->Ports(COM & LPT)\n"
+	fprintf(f, "\n#Windows(sometimes COM9 or any other number, find your COM devices with:\n");
+	fprintf(f, "#reg query HKLM\\HARDWARE\\DEVICEMAP\\SERIALCOMM')\n");
+	fprintf(f, "#alternatively check Control Panel->Device Manager->Ports(COM & LPT)\n");
 #else
 	fprintf(f, "\n#Linux(usually /dev/ttyUSB0, find your serial devices with 'dmesg | grep tty')\n");
 	fprintf(f, "#to open a serial device without running the emulator in sudo, add your user to the dialout group:\n");
@@ -2222,14 +2223,14 @@ print_message("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hos
 	hostEntry = gethostbyname((char *)hostname);
 	if(!hostEntry){
 		print_message("ESP: gethostbyname() failed: %d\n", cu_esp_get_last_error());
-		return INVALID_SOCKET;
+		return ESP_INVALID_SOCKET;
 	}
 
 	esp_state.socks[sock] = socket(AF_INET,(type & ESP_PROTO_TCP)?SOCK_STREAM:SOCK_DGRAM,(type & ESP_PROTO_TCP)?IPPROTO_TCP:0);
 
-	if(esp_state.socks[sock] == INVALID_SOCKET){
+	if(esp_state.socks[sock] == ESP_INVALID_SOCKET){
 		print_message("ESP: Failed to create socket: %d\n", cu_esp_get_last_error());
-		return INVALID_SOCKET;
+		return ESP_INVALID_SOCKET;
 	}
 
 	esp_state.sock_info[sock].sin_family = AF_INET;
@@ -2237,20 +2238,20 @@ print_message("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hos
 	esp_state.sock_info[sock].sin_port = htons(port);
 
 	if((connect(esp_state.socks[sock],(LPSOCKADDR)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == SOCKET_ERROR){
-		esp_state.socks[sock] = INVALID_SOCKET;
+		esp_state.socks[sock] = ESP_INVALID_SOCKET;
 
 		if(cu_esp_get_last_error() == WSAECONNREFUSED){
 			print_message("ESP: Remote actively refused connection, wrong port?\n");
-			return INVALID_SOCKET;
+			return ESP_INVALID_SOCKET;
 		}else{
 			print_message("ESP: Failed to connect, timeout or socket error: %d\n",cu_esp_get_last_error());
-			return INVALID_SOCKET;
+			return ESP_INVALID_SOCKET;
 		}
 
 		unsigned long block_mode = 1;
 		if(ioctlsocket(esp_state.socks[sock],FIONBIO,&block_mode) != NO_ERROR){
 			print_message("ESP: ioctlsocket() failed to set non-blocking mode: %d\n",cu_esp_get_last_error());
-//HACK disable for Emscripten			return INVALID_SOCKET;
+//HACK disable for Emscripten			return ESP_INVALID_SOCKET;
 		}
 	}
 #else
@@ -2659,7 +2660,7 @@ return 1;
 */
 	COMSTAT comstat;
 	DWORD dwError = 0;
-	ClearCommError(port->m_hComm, &dwError, &comstat);
+	ClearCommError(esp_state.host_serial_port, &dwError, &comstat);
 	return (comstat.cbInQue > 0);
 #else
 	int nbytes;
