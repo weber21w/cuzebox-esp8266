@@ -73,6 +73,7 @@ static const char ginput_gctr_filename[] = "gamecontrollerdb.txt";
 ** Returns controller name string for the given controller. Returns no-name
 ** string if it is nonexistent.
 */
+#ifndef HEADLESS
 static const char* ginput_gctr_name(auint i)
 {
  const char* tstr;
@@ -82,7 +83,7 @@ static const char* ginput_gctr_name(auint i)
  if (tstr == NULL){ return &(ginput_ctr_noname[0]); }
  return tstr;
 }
-
+#endif
 
 /*
 ** Returns player number (0 or 1) for which the game controller event should

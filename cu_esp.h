@@ -130,8 +130,9 @@
 #define ESP_ECONNREFUSED		ECONNREFUSED
 #endif
 
+//max string length is 128 for version info, according to firmware source code
 const char *start_up_string = "ets Mar 12 2023,rst cause 4, boot mode(3,7)\r\n\nwdt reset\r\nload 0x401000000,len 24444,room 16\r\nchksum 0xe0 ho 0 tail 12 room 4\r\nready\r\n";
-const char *at_gmr_string = "AT Version:CUzeBox ESP8266 AT Driver 0.5\r\nSDK version: ESP8266 SDK 1.2.0\r\nuzebox.org\r\nBuild:1.0\r\n";
+const char *at_gmr_string = "AT Version:CUzeBox ESP8266 AT Driver 1.7\r\nSDK version: ESP8266 SDK 1.2.0\r\nuzebox.org\r\nBuild:1.0\r\n";
 
 
 const char *fake_ap_name[] = {

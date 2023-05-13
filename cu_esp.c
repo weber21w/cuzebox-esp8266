@@ -101,7 +101,7 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* Uzebox has written a UART b
 //	print_message("ESP uzebox write %d(%c)\n", val, val);
 	if(!esp_state.uart_tx_enabled)
 		return;
-
+//printf("writings...\n");
 	/* need to set a delay until a write can happen again */
 	esp_state.write_ready_cycle = WRAP32(cycle + esp_state.uart_baud_bits); /* uart_baud_bits is recalculated everytime UART flags are changed */
 
@@ -127,13 +127,16 @@ void cu_esp_uzebox_write(uint8 val, auint cycle){ /* Uzebox has written a UART b
 	if(esp_state.uart_logging){
 
 		if(esp_state.uart_logging == 1){ /* binary output */
+//printf("file write\n");
 //			if(esp_state.uart_scramble)
 //				fprintf(esp_state.uart_logging_file, "-baud mismatch-\n");
 			fwrite(&cycle, 1, sizeof(cycle), esp_state.uart_logging_file); //time stamp(does roll over)
 			fputc(1, esp_state.uart_logging_file); //write
 			fputc((val&0xFF), esp_state.uart_logging_file); //actual UART value received by ESP8266(written by Uzebox)
 		}else{ /* host serial output(useful for external logging) */
-
+	//if(esp_state.host_serial_bypass)
+//printf("host write\n");
+		cu_esp_host_serial_write(val);
 		}
 	}
 
@@ -359,7 +362,8 @@ auint cu_esp_uzebox_read(auint cycle){ /* host side has attempted to receive a U
 			fputc(0, esp_state.uart_logging_file); //read
 			fputc((val&0xFF), esp_state.uart_logging_file); //actual UART value sent by ESP8266(read by Uzebox)
 		}else{
-
+	//if(esp_state.host_serial_bypass)
+		cu_esp_host_serial_write(val);
 		}
 	}
 
@@ -1023,6 +1027,7 @@ void cu_esp_at_cipclose(sint8 *cmd_buf){
 	}else if (cmd_buf[11] != '='){ /* Multiple connection mode */
 		cu_esp_txp_error();
 	}
+
 
 
 	sint8 i = cmd_buf[12];
@@ -1913,7 +1918,7 @@ void cu_esp_reset_factory(){
 	sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
 		
 	memset(esp_state.soft_ap_pass,'\0',sizeof(esp_state.soft_ap_pass));
-	sprintf((char *)esp_state.soft_ap_pass,"password");
+	sprintf((char *)esp_state.soft_ap_pass,"s0m3p4ssw0rd");
 		
 	memset(esp_state.soft_ap_mac,'\0',sizeof(esp_state.soft_ap_mac));
 	sprintf((char *)esp_state.soft_ap_mac,"ec:44:4a:67:cb:d8");
@@ -1925,7 +1930,7 @@ void cu_esp_reset_factory(){
 	sprintf((char *)esp_state.wifi_name,"uzenet");
 
 	memset(esp_state.wifi_pass,'\0',sizeof(esp_state.wifi_pass));
-	sprintf((char *)esp_state.wifi_pass,"h6dkj90xghrwx89hncx59ktre61hb2k77de67v1");
+	sprintf((char *)esp_state.wifi_pass,"s0m3p4ssw0rd");
 
 	memset(esp_state.wifi_mac,'\0',sizeof(esp_state.wifi_mac));
 	sprintf((char *)esp_state.wifi_mac,"60:22:32:e5:f3:85");
@@ -2088,6 +2093,55 @@ auint cu_esp_load_config(){
 		}
 	}
 
+	esp_state.uart_baud_bits_module_default = ESP_FACTORY_DEFAULT_BAUD_BITS; /* 9600 baud */
+	esp_state.uart_baud_bits_module = ESP_FACTORY_DEFAULT_BAUD_BITS;
+	esp_state.baud_rate=9600UL;
+	esp_state.uart_logging = 3;
+//	esp_state.emulation_model = 3;
+
+	if(strlen((char *)esp_state.soft_ap_name) < 1)
+		sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
+		
+	if(strlen((char *)esp_state.soft_ap_pass) < 1)
+		sprintf((char *)esp_state.soft_ap_pass,"s0m3p4ssw0rd");
+
+	if(strlen((char *)esp_state.soft_ap_mac) < 1)	
+		sprintf((char *)esp_state.soft_ap_mac,"ec:44:4a:67:cb:d8");
+
+	if(strlen((char *)esp_state.soft_ap_ip) < 1)		
+		sprintf((char *)esp_state.soft_ap_ip,"10.0.0.1");
+
+	if(strlen((char *)esp_state.wifi_name) < 1)
+		sprintf((char *)esp_state.wifi_name,"uzenet");
+
+	if(strlen((char *)esp_state.wifi_pass) < 1)
+		sprintf((char *)esp_state.wifi_pass,"s0m3p4ssw0rd");
+
+	if(strlen((char *)esp_state.wifi_mac) < 1)
+		sprintf((char *)esp_state.wifi_mac,"60:22:32:e5:f3:85");
+
+	if(strlen((char *)esp_state.wifi_ip) < 1)
+		sprintf((char *)esp_state.wifi_ip,"10.0.0.2");
+
+	if(strlen((char *)esp_state.ethernet_mac) < 1)
+		sprintf((char *)esp_state.ethernet_mac,"60:22:32:e5:f3:85");
+
+	if(strlen((char *)esp_state.ethernet_ip) < 1)
+		sprintf((char *)esp_state.ethernet_ip,"10.0.0.2");
+
+	if(strlen((char *)esp_state.bluetooth_mac) < 1)
+		sprintf((char *)esp_state.bluetooth_mac,"60:22:32:e5:f3:85");
+
+	if(strlen((char *)esp_state.bluetooth_ip) < 1)
+		sprintf((char *)esp_state.bluetooth_ip,"10.0.0.2");
+
+	if(strlen((char *)esp_state.uart_logging_fname) < 1)
+		sprintf((char *)esp_state.uart_logging_fname,"uart-debug.dat");
+
+	if(strlen((char *)esp_state.uart_playback_fname) < 1)
+		sprintf((char *)esp_state.uart_playback_fname,"uart-debug.dat");
+
+
 	if(esp_state.uart_logging && esp_state.uart_logging < 2 && esp_state.uart_playback){ /* can still playback a file with output to Host Serial for debugging */
 		esp_state.uart_logging = 0;
 		print_message("***UART Logging disabled due to UART file playback[%s]\n", esp_state.uart_logging_fname);
@@ -2126,12 +2180,15 @@ auint cu_esp_load_config(){
 	print_message("\tHostSerialDevice[%s]\n", esp_state.host_serial_device_name);
 	fclose(f);
 
+//cu_esp_host_serial_start();
+//cu_esp_host_serial_write('c');
 	if(esp_state.host_serial_bypass){
 		if(cu_esp_host_serial_start())
 			esp_state.host_serial_bypass = 0; /* stop logging to serial if the open failed */
 		else
 			print_message("ESP Opened Host Serial Device [%s] for bypass\n", esp_state.host_serial_device_name);
 	}
+
 	//only open a log or playback file once per system reset(user code will commonly reset the module 1 or more times, the timing is based on the CPU)
 	if(!esp_state.uart_logging_started && esp_state.uart_logging && esp_state.uart_logging < 3){ /* logging output */
 
@@ -2164,6 +2221,9 @@ auint cu_esp_load_config(){
 			print_message("ESP UART playback started [%s]\n", esp_state.uart_playback_fname);
 			
 	}
+
+	if(!esp_state.uart_logging_started && esp_state.uart_logging == 3)
+		cu_esp_host_serial_start();
 	
 	return ret;
 }
@@ -2237,7 +2297,7 @@ print_message("STARTING CONNECTION TO [%s], conn: %d, port: %d, type: %s\n", hos
 	esp_state.sock_info[sock].sin_addr = *((LPIN_ADDR)*hostEntry->h_addr_list);
 	esp_state.sock_info[sock].sin_port = htons(port);
 
-	if((connect(esp_state.socks[sock],(LPSOCKADDR)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == SOCKET_ERROR){
+	if((connect(esp_state.socks[sock],(LPSOCKADDR)&esp_state.sock_info[sock],sizeof(struct sockaddr))) == ESP_SOCKET_ERROR){
 		esp_state.socks[sock] = ESP_INVALID_SOCKET;
 
 		if(cu_esp_get_last_error() == WSAECONNREFUSED){
@@ -2396,7 +2456,8 @@ sint32 cu_esp_net_send(uint32 sock, sint8 *buf, sint32 len, sint32 flags){
 //buf[len] = '\0';
 
 //print_message("SEND() sock: %d, buf[%s], len: %d, flags: %d\n", sock, buf, len, flags);
-
+	if(esp_state.socks[sock] == ESP_SOCKET_ERROR)
+		return ESP_SOCKET_ERROR;
 	return send(esp_state.socks[sock], (char *)buf, len, flags);
 }
 
@@ -2414,6 +2475,9 @@ void cu_esp_net_send_unvarnished(sint8 *buf, auint len){
 //print_message("SEND UNVARNISHED[%s]\n", buf);
 	if(cu_esp_net_send(0, buf, len, 0) == ESP_SOCKET_ERROR){
 		print_message("ESP ERROR cu_esp_net_send() failed: %d\n", cu_esp_get_last_error());
+		esp_state.socks[0] = ESP_SOCKET_ERROR;
+		cu_esp_txp_error();
+		cu_esp_txp("UNLINKED\r\n");
 	}
 
 }
@@ -2614,7 +2678,7 @@ void cu_esp_host_serial_end(){
 }
 
 void cu_esp_host_serial_write(uint8 c){
-printf("WROTE HOST BYTE [%c]\n", c);
+//printf("WROTE HOST BYTE [%c]\n", c);
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	DWORD written;
 	BOOL success = WriteFile(esp_state.host_serial_port, &c, 1, &written, NULL);
@@ -2630,6 +2694,7 @@ printf("WROTE HOST BYTE [%c]\n", c);
 }
 
 uint8 cu_esp_host_serial_read(){
+//printf("HOST SERIAL READ\n");
 	uint8 c[2];
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	DWORD received;
@@ -2641,17 +2706,17 @@ uint8 cu_esp_host_serial_read(){
 #else
 	ssize_t received = read(esp_state.host_serial_port, c, 1);
 	if(received == -1){
-		print_message("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
+//		print_message("ESP ERROR: failed to read from host serial port: %d\n", cu_esp_get_last_error());
 		return 0;
 	}
 #endif
 	//return received;
-printf("WROTE HOST BYTE [%c]\n", c[0]);
+//printf("WROTE HOST BYTE [%c]\n", c[0]);
 	return c[0];
 }
 
 auint cu_esp_host_serial_rx_bytes_ready(){ /* this is inefficient, should just try to read a byte, buffer and flag if it's pre-read, then serve it next... */
-printf("CHECKED HOST SERIAL RX READY\n");
+//printf("CHECKED HOST SERIAL RX READY\n");
 return 1;
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 /*	long nbytes;

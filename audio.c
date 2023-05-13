@@ -257,7 +257,7 @@ static void audio_wasapi_workaround(void)
 boole audio_init(void)
 {
 #ifdef HEADLESS
- return;
+ return 0U;
 #endif
  SDL_AudioSpec desired;
 #ifndef USE_SDL1
