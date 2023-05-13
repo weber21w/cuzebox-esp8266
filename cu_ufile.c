@@ -38,9 +38,11 @@ static const uint8 cu_magic[] = {'U', 'Z', 'E', 'B', 'O', 'X'};
 
 
 /* String constants */
+#ifndef HEADLESS
 static const char cu_id[]  = "UzeRom parser: ";
 static const char cu_err[] = "Error: ";
 static const char cu_war[] = "Warning: ";
+#endif
 
 #define PERIPHERAL_MOUSE 1
 #define PERIPHERAL_KEYBOARD 2
