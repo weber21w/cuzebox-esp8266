@@ -58,9 +58,10 @@ static boole ginput_gamectr_ddig[2][4];
 /* Directional moves collected from analog inputs */
 static boole ginput_gamectr_dana[2][4];
 
+#ifndef HEADLESS
 /* Controller name when no name string is available */
 static const char ginput_ctr_noname[] = "<no name>";
-
+#endif
 /* Game controller DB filename */
 static const char ginput_gctr_filename[] = "gamecontrollerdb.txt";
 #endif
