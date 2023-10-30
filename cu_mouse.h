@@ -30,10 +30,10 @@
 
 #include "types.h"
 
-uint8 cu_mouse_enabled;
-sint32 cu_mouse_dx, cu_mouse_dy;
-uint8 cu_mouse_buttons;
-uint8 cu_mouse_scale;
+extern uint8 cu_mouse_enabled;
+extern sint32 cu_mouse_dx, cu_mouse_dy;
+extern uint8 cu_mouse_buttons;
+extern uint8 cu_mouse_scale;
 
 void cu_adjust_mouse_scale();
 

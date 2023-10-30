@@ -29,6 +29,19 @@
 #include "cu_kbd.h"
 #include "cu_mouse.h"
 
+auint cu_kbd_state;
+auint cu_kbd_clock;
+auint cu_kbd_data_in;
+auint cu_kbd_data_out;
+auint cu_kbd_enabled;
+auint cu_kbd_bypassed; /* don't check for start condition, allows user to break out of keyboard passthrough mode and use emulator controls */
+
+auint cu_kbd_queue_in;
+auint cu_kbd_queue_out;
+uint8 cu_kbd_queue[512];
+
+auint cu_kbd_held_lctrl;
+
 
 /* Scan codes */
 const auint cu_kbd_scan_codes[][2] = {
@@ -245,4 +258,3 @@ auint  cu_kbd_get_enabled(void){
 void cu_kbd_set_enabled(uint8 val){
  cu_kbd_enabled = val;
 }
-

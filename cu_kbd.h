@@ -30,18 +30,18 @@
 
 #include "types.h"
 
-auint cu_kbd_state;
-auint cu_kbd_clock;
-auint cu_kbd_data_in;
-auint cu_kbd_data_out;
-auint cu_kbd_enabled;
-auint cu_kbd_bypassed; /* don't check for start condition, allows user to break out of keyboard passthrough mode and use emulator controls */
+extern auint cu_kbd_state;
+extern auint cu_kbd_clock;
+extern auint cu_kbd_data_in;
+extern auint cu_kbd_data_out;
+extern auint cu_kbd_enabled;
+extern auint cu_kbd_bypassed; /* don't check for start condition, allows user to break out of keyboard passthrough mode and use emulator controls */
 
-auint cu_kbd_queue_in;
-auint cu_kbd_queue_out;
-uint8 cu_kbd_queue[512];
+extern auint cu_kbd_queue_in;
+extern auint cu_kbd_queue_out;
+extern uint8 cu_kbd_queue[512];
 
-auint cu_kbd_held_lctrl;
+extern auint cu_kbd_held_lctrl;
 
 
 /* Keyboard Dongle defines */
