@@ -493,6 +493,12 @@ void cu_esp_reset_pin(uint8 state, auint cycle){
 //		cu_esp_timed_stall(WRAP32(cycle + ESP_RESET_BOOT_DELAY)); /* this will delay UART output until a semi-realistic boot delay has happened */ 
 //		esp_state.wifi_timer = 1;
 //		esp_state.wifi_delay = ESP_AT_CWJAP_DELAY;
+
+		for(int i=0; i<ESP_GPIO_PIN_COUNT; i++){//set default state of GPIO pins...
+			if(i == 0 || i == 1 || i == 3 || i == 9 || i == 10 || i == 16)
+				esp_state.gpio_pullup[i] = 1;
+			esp_state.gpio_pullup[i] = 0;
+		}
 		cu_esp_txp(start_up_string);
 		if(esp_state.emulation_model == 0)
 			print_message("ESP: Disabled\n");
@@ -567,7 +573,7 @@ uint16 cu_esp_checksum(void *b, sint32 len){ /* Standard 1s complement checksum 
 
 void cu_esp_at_cwsap(sint8 *cmd_buf){ /* Get or set wifi credentials for softAP */
 
-	if (!strncmp((char*)&cmd_buf[3+5],"?\r\n",3) || !strncmp((char*)&cmd_buf[3+5],"_CUR?\r\n",7) || !strncmp((char*)&cmd_buf[3+5],"_DEF?\r\n",7)){ /* Query only */
+	if (!strncmp((char*)&cmd_buf[3+5],"?\r\n",3) || !strncmp((char*)&cmd_buf[3+5],"_CUR?\r\n",7) || !strncmp((char*)&cmd_buf[3+5],"_DEF?\r\n",7)){ /* query only */
 
 		char sapbuffer[256];
 		if (!strncmp((char*)&cmd_buf[3+5],"_DEF?\r\n",7)){ /* Must read default saved version in case current version is different */
@@ -643,7 +649,7 @@ asm volatile("": : :"memory"); /* Memory fence */
 void cu_esp_at_cipsend(sint8 *cmd_buf){ /* Send a packet */
 
 
-	if (!strncmp((char*)&cmd_buf[3+7],"?\r\n",3)){ /* Query only */
+	if (!strncmp((char*)&cmd_buf[3+7],"?\r\n",3)){ /* query only */
 			
 		if ( (esp_state.state & ESP_AP_CONNECTED) && (esp_state.socks[0] != ESP_INVALID_SOCKET))
 			cu_esp_txp_ok(); /* Sends should succeed */
@@ -765,7 +771,7 @@ void cu_esp_at_cwjap(sint8 *cmd_buf){ /* Join a wifi access point, fake, wont us
 print_message("ESP Join AP\n");
 	uint8 at_error = 0;
 	sint32 i;
-	if (0 && strncmp("?\r\n",(const char *)&cmd_buf[8],3)){ /* Query only */
+	if (0 && strncmp("?\r\n",(const char *)&cmd_buf[8],3)){ /* query only */
 
 		if (esp_state.state & ESP_AP_CONNECTED){
 			char ap_buffer[64+64];
@@ -831,9 +837,9 @@ void cu_esp_at_cwmode(sint8 *cmd_buf){
 
 	if (!strncmp((char*)&cmd_buf[9],"?\r\n",3)){ /* Query which mode we are in */
 		
-		if (esp_state.uart_at_mode == 1) /* STA */
+		if (esp_state.wifi_mode == 1) /* STA */
 			cu_esp_txp((const char*)"CWMODE:1\r\nOK\r\n");
-		else if (esp_state.uart_at_mode == 2) /* AP */
+		else if (esp_state.wifi_mode == 2) /* AP */
 			cu_esp_txp((const char*)"CWMODE:2\r\nOK\r\n");
 		else /* STA+AP */
 			cu_esp_txp((const char*)"CWMODE:3\r\nOK\r\n");
@@ -853,7 +859,7 @@ void cu_esp_at_cwmode(sint8 *cmd_buf){
 			/* TODO SAVE THIS TO FLASH?!? */
 			cu_esp_txp_ok();
 			mt -= '1';
-			esp_state.uart_at_mode = mt;
+			esp_state.wifi_mode = mt;
 
 		}
 
@@ -873,7 +879,7 @@ void cu_esp_at_cwmode(sint8 *cmd_buf){
 
 			cu_esp_txp_ok();
 			mt -= '1';
-			esp_state.uart_at_mode = mt;
+			esp_state.wifi_mode = mt;
 		}
 
 	}else{ /* Bad format */
@@ -1211,7 +1217,7 @@ void cu_esp_at_cipmux(sint8 *cmd_buf){
  /* This mode can only be changed after all connections are disconnected. If server is started, reboot is required TODO */
 
 	/* sint32 at_error = 0; */
-	if (!strncmp((char*)&cmd_buf[9],"?\r\n",3)){ /* Query only */
+	if (!strncmp((char*)&cmd_buf[9],"?\r\n",3)){ /* query only */
 
 		if (esp_state.state & ESP_MUX)
 			cu_esp_txp((const char*)"MUX is 1\r\n");
@@ -1329,7 +1335,7 @@ void cu_esp_save_station_mac(sint8 *cmd_buf){
 
 void cu_esp_at_cipstamac(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wiki/CIPSTAMAC */
 
-	if (!strncmp((const char*)&cmd_buf[12],"?\r\n",3)){ /* Query only */
+	if (!strncmp((const char*)&cmd_buf[12],"?\r\n",3)){ /* query only */
 
 		cu_esp_timed_stall(ESP_AT_OK_DELAY);
 		cu_esp_txp("+CIPSTAMAC:");
@@ -1349,9 +1355,9 @@ void cu_esp_at_cipstamac(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT
 }
 
 
-void cu_esp_at_cipapMAC(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wiki/CIPAPMAC */
+void cu_esp_at_cipapmac(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wiki/CIPAPMAC */
 
-	if (!strncmp((const char*)&cmd_buf[11],"?\r\n",3)){ /* Query only */
+	if (!strncmp((const char*)&cmd_buf[11],"?\r\n",3)){ /* query only */
 
 		/* cu_esp_timed_stall(ESP_AT_OK_DELAY); */
 		cu_esp_txp("+CIPAPMAC:\"");
@@ -1373,7 +1379,7 @@ void cu_esp_at_cipapMAC(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/
 
 void cu_esp_at_cipsta(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wiki/CIPSTA */
 
-	if (!strncmp((const char*)&cmd_buf[9],"?\r\n",3)){ /* Query only */
+	if (!strncmp((const char*)&cmd_buf[9],"?\r\n",3)){ /* query only */
 
 		cu_esp_timed_stall(ESP_AT_OK_DELAY);
 		cu_esp_txp("+CIPSTA:");
@@ -1395,7 +1401,7 @@ void cu_esp_at_cipsta(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wi
 
 void cu_esp_at_cipap(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wiki/CIPAP */
 
-	if (!strncmp((const char*)&cmd_buf[8],"?\r\n",3)){ /* Query only */
+	if (!strncmp((const char*)&cmd_buf[8],"?\r\n",3)){ /* query only */
 
 		/* if (esp_state.debug_level > 0)	print_message("AT+CIPAP query only\n",0); */
 		cu_esp_timed_stall(ESP_AT_OK_DELAY);
@@ -1419,7 +1425,7 @@ void cu_esp_at_cipsto(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wi
 	/* Server timeout, range 0~7200 seconds */
 	/* If 0, will never timeout */
 
-	if (!strncmp((const char*)&cmd_buf[9],"?\r\n",3)){ /* Query only */
+	if (!strncmp((const char*)&cmd_buf[9],"?\r\n",3)){ /* query only */
 
 		cu_esp_txp("+CIPSTO:");
 		cu_esp_txi(esp_state.server_timeout);
@@ -1441,6 +1447,369 @@ void cu_esp_at_cifsr(sint8 *cmd_buf){ /* https://github.com/espressif/esp_AT/wik
 	/* TODO DO SOFTAP, OR NO IP IF NOT CONNECTED */
 	cu_esp_txp("+CIFSR:");
 	cu_esp_txp((char *)esp_state.wifi_ip);
+	cu_esp_txp_ok();
+}
+
+
+
+
+
+
+
+void cu_esp_at_savetranslink(sint8 *cmd_buf){}
+
+void cu_esp_at_sysmsg(sint8 *cmd_buf){
+	if (!strncmp((const char*)&cmd_buf[9],"?\r\n",3)){ /* query only */
+
+		cu_esp_timed_stall(ESP_AT_OK_DELAY);
+		cu_esp_txp("+SYSMSG:");
+		cu_esp_txi(esp_state.sysmsg_flags);
+		cu_esp_txp("\r\n");
+		cu_esp_txp_ok();
+	}
+}
+void cu_esp_at_sleep(sint8 *cmd_buf){
+	if (!strncmp((const char*)&cmd_buf[8],"?\r\n",3)){ /* query only */
+
+		cu_esp_timed_stall(ESP_AT_OK_DELAY);
+		cu_esp_txp("+SLEEP:");
+		cu_esp_txi(esp_state.sleep_mode);
+		cu_esp_txp("\r\n");
+		cu_esp_txp_ok();
+	}
+}
+
+void cu_esp_at_cipsntpcfg(sint8 *cmd_buf){
+	if (!strncmp((const char*)&cmd_buf[13],"?\r\n",3)){ /* query only */
+
+		cu_esp_timed_stall(ESP_AT_OK_DELAY);
+		cu_esp_txp("+CIPSNTPCFG:");
+		cu_esp_txi(esp_state.sntp_enabled);
+		cu_esp_txp(",");
+		cu_esp_txi(esp_state.sntp_timezone);
+		cu_esp_txp(",");
+		cu_esp_txp((char *)esp_state.sntp_server[0]);
+		cu_esp_txp(",");
+		cu_esp_txp((char *)esp_state.sntp_server[1]);
+		cu_esp_txp(",");
+		cu_esp_txp((char *)esp_state.sntp_server[2]);
+		cu_esp_txp_ok();
+	}else if (!strncmp((const char*)&cmd_buf[13],"\r\n",2)){ /* clear parameters */
+
+		esp_state.sntp_timezone = ESP_DEFAULT_TIMEZONE;
+		sprintf((char *)esp_state.sntp_server[0], "%s", default_sntp_server0);
+		sprintf((char *)esp_state.sntp_server[0], "%s", default_sntp_server1);
+		sprintf((char *)esp_state.sntp_server[0], "%s", default_sntp_server2);
+		cu_esp_timed_stall(ESP_AT_OK_DELAY);
+		cu_esp_txp_ok();
+	}else{ /* set parameters */
+	
+	}
+}
+void cu_esp_at_cipsntptime(sint8 *cmd_buf){
+	/* for now, just use the system time which is presumably synced with the user's preferred NTP server... */
+	time_t current_time;
+	time(&current_time);
+	struct tm *curr_t_struct = gmtime(&current_time );
+	cu_esp_timed_stall(ESP_SNTP_NET_DELAY);
+	sprintf((char *)esp_state.sntp_lasttime[0], "%s", asctime(curr_t_struct));
+	cu_esp_txp((char *)esp_state.sntp_lasttime[0]);
+}
+
+void cu_esp_at_sysadc(sint8 *cmd_buf){
+
+}
+
+void cu_esp_at_sysram(sint8 *cmd_buf){
+	cu_esp_txp("+SYSRAM:148408,84044\r\n");
+	cu_esp_txp_ok();
+}
+void cu_esp_at_cwlapopt(sint8 *cmd_buf){}
+
+void cu_esp_at_cwhostname(sint8 *cmd_buf){
+	if (!strncmp((const char*)&cmd_buf[13],"?\r\n",3)){ /* query only */
+
+		cu_esp_timed_stall(ESP_AT_OK_DELAY);
+		cu_esp_txp("+:");
+		cu_esp_txi(esp_state.sleep_mode);
+		cu_esp_txp("\r\n");
+		cu_esp_txp_ok();
+	}
+}
+
+
+void cu_esp_at_wps(sint8 *cmd_buf){
+	if(cmd_buf[6] != '=' || cmd_buf[8] != '\r' || cmd_buf[9] != '\n' || cmd_buf[7] < '0' || cmd_buf[7] > '1'){
+		cu_esp_txp_error();
+		return;
+	}
+
+	int val = cmd_buf[7]-'0';
+	if(esp_state.wifi_mode != ESP_WIFI_MODE_STATION || val < 0 || val > 1){
+		cu_esp_txp_error();
+		return;
+	}
+
+	esp_state.wps = val;
+	cu_esp_txp_ok();
+}
+
+void cu_esp_at_wakeupgpio(sint8 *cmd_buf){}
+
+void cu_esp_at_sysgpioread(sint8 *cmd_buf){
+	if(cmd_buf[15] < '0' || cmd_buf[15] > '9')
+		goto CU_ESP_AT_SYSGPIOREAD_ERROR;
+
+	int pin = cmd_buf[15]-'0';
+	if(cmd_buf[16] >= '0' && cmd_buf[16] <= '9'){
+		pin *= 10;
+		pin += cmd_buf[16]-'0';
+		if(cmd_buf[17] != ',' || cmd_buf[19] != '\r' || cmd_buf[20] != '\n')
+			goto CU_ESP_AT_SYSGPIOREAD_ERROR;
+
+	}else if(cmd_buf[16] != ','|| cmd_buf[18] != '\r' || cmd_buf[19] != '\n'){
+		goto CU_ESP_AT_SYSGPIOREAD_ERROR;
+	}
+
+	if(pin < 0 || pin >= ESP_GPIO_PIN_COUNT)
+		goto CU_ESP_AT_SYSGPIOREAD_ERROR;
+
+	if(esp_state.gpio_mode[pin] != 3){
+		cu_esp_txp("NOT GPIO MODE!\r\n");
+		goto CU_ESP_AT_SYSGPIOREAD_ERROR;
+	}
+
+	cu_esp_txp("+SYSGPIOREAD:");
+	cu_esp_txi(pin);
+	cu_esp_txp(",");
+	cu_esp_txi(esp_state.gpio_dir[pin]);
+	cu_esp_txp(",");
+	cu_esp_txi(esp_state.gpio_level[pin]); //TODO model pullup, or connected device?
+	cu_esp_txp("\r\n");
+	cu_esp_txp_ok();
+	return;
+CU_ESP_AT_SYSGPIOREAD_ERROR:
+	cu_esp_txp_error();
+}
+
+void cu_esp_at_sysgpiowrite(sint8 *cmd_buf){
+	if(cmd_buf[16] < '0' || cmd_buf[16] > '9')
+		goto CU_ESP_AT_SYSGPIOWRITE_ERROR;
+
+	int pin = cmd_buf[16]-'0';
+	int val;
+	if(cmd_buf[17] >= '0' && cmd_buf[17] <= '9'){
+		pin *= 10;
+		pin += cmd_buf[17]-'0';
+		if(cmd_buf[18] != ',' || cmd_buf[20] != '\r' || cmd_buf[21] != '\n')
+			goto CU_ESP_AT_SYSGPIOWRITE_ERROR;
+
+		val = cmd_buf[17]-'0';
+	}else if(cmd_buf[17] != ',' || cmd_buf[19] != '\r' || cmd_buf[20] != '\n'){
+		goto CU_ESP_AT_SYSGPIOWRITE_ERROR;
+	}else
+		val = cmd_buf[17]-'0';
+
+	if(pin < 0 || pin >= ESP_GPIO_PIN_COUNT || val < 0 || val > 1)
+		goto CU_ESP_AT_SYSGPIOWRITE_ERROR;
+
+	if(esp_state.gpio_dir[pin] != 1){
+		cu_esp_txp("NOT OUTPUT!\r\n");
+		goto CU_ESP_AT_SYSGPIOWRITE_ERROR;
+	}
+
+	esp_state.gpio_level[pin] = val;
+	cu_esp_txp_ok();
+	return;
+CU_ESP_AT_SYSGPIOWRITE_ERROR:
+	cu_esp_txp_error();
+}
+
+void cu_esp_at_sysgpiodir(sint8 *cmd_buf){
+	if(cmd_buf[14] < '0' || cmd_buf[14] > '9')
+		goto CU_ESP_AT_SYSGPIODIR_ERROR;
+
+	int pin = cmd_buf[14]-'0';
+	int val;
+	if(cmd_buf[15] >= '0' && cmd_buf[15] <= '9'){
+		pin *= 10;
+		pin += cmd_buf[15]-'0';
+		if(cmd_buf[16] != ',' || cmd_buf[18] != '\r' || cmd_buf[19] != '\n')
+			goto CU_ESP_AT_SYSGPIODIR_ERROR;
+
+		val = cmd_buf[15]-'0';
+	}else if(cmd_buf[15] != ',' || cmd_buf[17] != '\r' || cmd_buf[18] != '\n'){
+		goto CU_ESP_AT_SYSGPIODIR_ERROR;
+	}else
+		val = cmd_buf[15]-'0';
+
+	if(pin < 0 || pin >= ESP_GPIO_PIN_COUNT || val < 0 || val > 1)
+		goto CU_ESP_AT_SYSGPIODIR_ERROR;
+
+	if(esp_state.gpio_mode[pin] != 3){
+		cu_esp_txp("NOT GPIO MODE!\r\n");
+		goto CU_ESP_AT_SYSGPIODIR_ERROR;
+	}
+
+	esp_state.gpio_dir[pin] = val;
+	cu_esp_txp_ok();
+	return;
+CU_ESP_AT_SYSGPIODIR_ERROR:
+	cu_esp_txp_error();
+}
+
+void cu_esp_at_sysiogetcfg(sint8 *cmd_buf){
+	if(cmd_buf[15] < '0' || cmd_buf[15] > '9')
+		goto CU_ESP_AT_SYSIOGETCFG_ERROR;
+
+	int pin = cmd_buf[15]-'0';
+	int val;
+	if(cmd_buf[16] >= '0' && cmd_buf[16] <= '9'){
+		pin *= 10;
+		pin += cmd_buf[16]-'0';
+		if(cmd_buf[17] != ',' || cmd_buf[19] != '\r' || cmd_buf[20] != '\n')
+			goto CU_ESP_AT_SYSIOGETCFG_ERROR;
+
+	}else if(cmd_buf[16] != ',' || cmd_buf[18] != '\r' || cmd_buf[19] != '\n')
+		goto CU_ESP_AT_SYSIOGETCFG_ERROR;
+
+	if(pin < 0 || pin >= ESP_GPIO_PIN_COUNT || val < 0 || val > 1)
+		goto CU_ESP_AT_SYSIOGETCFG_ERROR;
+
+	if(esp_state.gpio_dir[pin] != 1){
+		cu_esp_txp("NOT OUTPUT!\r\n");
+		goto CU_ESP_AT_SYSIOGETCFG_ERROR;
+	}
+
+	cu_esp_txp("+SYSGIOGETCFG::");
+	cu_esp_txi(pin);
+	cu_esp_txp(",");
+	cu_esp_txi(esp_state.gpio_mode[pin]);
+	cu_esp_txp(",");
+	cu_esp_txi(esp_state.gpio_level[pin]); //TODO model pullup, or connected device?
+	cu_esp_txp("\r\n");
+	cu_esp_txp_ok();
+	return;
+CU_ESP_AT_SYSIOGETCFG_ERROR:
+	cu_esp_txp_error();
+}
+
+void cu_esp_at_sysiosetcfg(sint8 *cmd_buf){
+	if(cmd_buf[15] < '0' || cmd_buf[15] > '9')
+		goto CU_ESP_AT_SYSIOSETCFG_ERROR;
+
+	int pin = cmd_buf[15]-'0';
+	int val;
+	if(cmd_buf[16] >= '0' && cmd_buf[16] <= '9'){
+		pin *= 10;
+		pin += cmd_buf[16]-'0';
+		if(cmd_buf[17] != ',' || cmd_buf[19] != '\r' || cmd_buf[20] != '\n')
+			goto CU_ESP_AT_SYSIOSETCFG_ERROR;
+
+		val = cmd_buf[16]-'0';
+	}else if(cmd_buf[16] != ',' || cmd_buf[18] != '\r' || cmd_buf[19] != '\n'){
+		goto CU_ESP_AT_SYSIOSETCFG_ERROR;
+	}else
+		val = cmd_buf[16]-'0';
+
+	if(pin < 0 || pin >= ESP_GPIO_PIN_COUNT || val < 0 || val > 1)
+		goto CU_ESP_AT_SYSIOSETCFG_ERROR;
+
+	if(esp_state.gpio_mode[pin] != 3){
+		cu_esp_txp("NOT GPIO MODE!\r\n");
+		goto CU_ESP_AT_SYSIOSETCFG_ERROR;
+	}
+
+	esp_state.gpio_mode[pin] = val;
+	cu_esp_txp_ok();
+	return;
+CU_ESP_AT_SYSIOSETCFG_ERROR:
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipbufrecvmode(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipbufrecvlen(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipbufrecvdata(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_mdns(sint8 *cmd_buf){
+	/* no query mode? */
+	/* AT+MDNS=1,"espressif","iot",8080 */
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipsslconf(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipsslsize(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipdomain(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipservermaxconn(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_ciprecvdata(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_ciprecvmode(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_ciprecvlen(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cipcheckseq(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cwstartdiscover(sint8 *cmd_buf){
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
+}
+
+
+void cu_esp_at_cwstopdiscover(sint8 *cmd_buf){
+	esp_state.wechat_enable = 0;
 	cu_esp_txp_ok();
 }
 
@@ -1495,12 +1864,9 @@ void cu_esp_at_rfpower(sint8 *cmd_buf){
 
 
 void cu_esp_at_rfvdd(sint8 *cmd_buf){
-
-
+	cu_esp_txp("NOT IMPLEMENTED!\r\n");
+	cu_esp_txp_error();
 }
-
-
-
 
 
 void cu_esp_at_restore(sint8 *cmd_buf){
@@ -1647,7 +2013,7 @@ void cu_esp_at_cipbufreset(sint8 *cmd_buf){
 	}
 }
 
-void cu_esp_at_cipcheckseq(sint8 *cmd_buf){
+void cu_esp_at_cipbufcheckseq(sint8 *cmd_buf){
 	cu_esp_at_bad_command();
 }
 
@@ -1757,82 +2123,189 @@ print_message("PROCESS AT [%s]\n", cmd_buf);
 			return;
 
 		}
-		cu_esp_txp_error();//something else?
+		cu_esp_at_bad_command();//something else?
 		return;
 	}
 
 	/* To get here we know the buffer starts with "AT+" */
 
-	if (cmd_buf[3] == 'C'){ /* "C.." */
+	if (cmd_buf[3] == 'C'){ /* "AT+C.." */
 		
-		if (cmd_buf[4] == 'I'){ /* "CI.." */
+		if (cmd_buf[4] == 'I'){ /* "AT+CI.." */
 
-			/* if (commandlen == ... */
+			if(cmd_buf[5] == 'P'){ /* "AT+CIP.." */
 			
-			if (!strncmp((char*)&cmd_buf[5],"PSEND",5)) /* send a packet(most common command during gameplay) */
-				cu_esp_at_cipsend(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PSTART=",7)) /* starting a connection */
-				cu_esp_at_cipstart(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PCLOSE",6)) /* Close a connection, different format depending on CIPMUX? */
-				cu_esp_at_cipclose(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PMODE=",6)) /* Set packet sending mode */
-				cu_esp_at_cipmode(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"FSR",3)) /* List ip addresse(s) */
-				cu_esp_at_cifsr(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PSTATUS",7)) /* Get the status of connections */
-				cu_esp_at_cipstatus(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PSERVER=",8)) /* Turn listen mode on or off */
-				cu_esp_at_cipserver(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PMUX",4)) /* Turn multiple connections mode on or off */
-				cu_esp_at_cipmux(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"OBAUD=",6)) /* Change the baud rate(certain firmwares) */
-				cu_esp_at_ciobaud(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PSTAMAC",7)) /* Set station mac address */
-				cu_esp_at_cipstamac(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PSTA",4)) /* Set ip address of station */
-				cu_esp_at_cipsta(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PAPMAC",6))
-				cu_esp_at_cipapMAC(cmd_buf+6);
-			else if (!strncmp((char*)&cmd_buf[5],"PAP",3)) /* Set ip address of softAP(access point emulated by 8266) */
-				cu_esp_at_cipap(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"PSTO",4)) /* Set server time out(0~7200 seconds) */
-				cu_esp_at_cipsto(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"UPDATE",6)) /* Get firmware upgrade OTA(fake) */
-				cu_esp_at_ciupdate(cmd_buf);
-			else
-				cu_esp_at_bad_command();
+				if (!strncmp((char*)&cmd_buf[6],"SEND",4)) /* AT+CIPSEND or AT+CIPSENDEX or AT+CIPSENDBUF */
+					cu_esp_at_cipsend(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"BUFRESET",8)) /* AT+CIPBUFRESET */
+					cu_esp_at_cipbufreset(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"BUFSTATUS",9)) /* AT+CIPBUFSTATUS */
+					cu_esp_at_cipbufstatus(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"START=",6)) /* AT+CIPSTART */
+					cu_esp_at_cipstart(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"CLOSE",5)) /* AT+CIPCLOSE */
+					cu_esp_at_cipclose(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"MODE=",5)) /* AT+CIPMODE */
+					cu_esp_at_cipmode(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"STATUS\r\n",8)) /* AT+CIPSTATUS */
+					cu_esp_at_cipstatus(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"CHECKSEQ",8)) /* AT+CIPCHECKSEQ */
+					cu_esp_at_cipcheckseq(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"RECVMODE",8)) /* AT+CIPRECVMODE */
+					cu_esp_at_ciprecvmode(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"RECVDATA",8)) /* AT+CIPRECVDATA */
+					cu_esp_at_ciprecvdata(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"RECVLEN",7)) /* AT+CIPRECVLEN */
+					cu_esp_at_ciprecvlen(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"SERVER=",7)) /* AT+CIPSERVER */
+					cu_esp_at_cipserver(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"MUX",3)) /* AT+CIPMUX */
+					cu_esp_at_cipmux(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"STAMAC",6)) /* AT+CIPSTAMAC */
+					cu_esp_at_cipstamac(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"STA",3)) /* AT+CIPSTA */
+					cu_esp_at_cipsta(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"APMAC",5)) /* AT+CIPAPMAC */
+					cu_esp_at_cipapmac(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"AP",2)) /* AT+CIPAP */
+					cu_esp_at_cipap(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"SERVERMAXCONN",13)) /* AT+CIPSERVERMAXCONN */
+					cu_esp_at_cipservermaxconn(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"SERVER",6)) /* AT+CIPSERVER */
+					cu_esp_at_cipserver(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"STO",3)) /* AT+CIPSTO */
+					cu_esp_at_cipsto(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"DINFO",5)) /* AT+CIPDINFO */
+					cu_esp_at_cipdinfo(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"DOMAIN",6)) /* AT+CIPDOMAIN */
+					cu_esp_at_cipdomain(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"SSLSIZE",7)) /* AT+CIPSSLSIZE */
+					cu_esp_at_cipsslsize(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"SSLCONF",7)) /* AT+CIPSSLCONF */
+					cu_esp_at_cipsslconf(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"DNS",3)) /* AT+CIPDNS */
+					cu_esp_at_cipservermaxconn(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"SNTPCFG",7)) /* AT+CIPSNTPCFG */
+					cu_esp_at_cipsntpcfg(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[6],"SNTPTIME",8)) /* AT+CIPSNTPTIME */
+					cu_esp_at_cipsntptime(cmd_buf);
+				else
+					cu_esp_at_bad_command();
+			}else{ /* "AT+CI.." !"AT+CIP" */
+				if (!strncmp((char*)&cmd_buf[5],"FSR",3)) /* AT+CIFSR */
+					cu_esp_at_cifsr(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"OBAUD=",6)) /* AT+CIOBAUD(depreciated?) */
+					cu_esp_at_ciobaud(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"UPDATE",6)) /* AT+CIUPDATE */
+					cu_esp_at_ciupdate(cmd_buf);
+				else
+					cu_esp_at_bad_command();
+			}
 		
-		}else if (cmd_buf[4] == 'W'){ /* "CW.." */
+		}else if (cmd_buf[4] == 'W'){ /* "AT+CW.." */
 
 			if (!strncmp((char*)&cmd_buf[5],"QAP",3)) /* quit/disconnect from the AP */
 				cu_esp_at_cwqap(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"LAP\r\n",5)) /* List APs, fake, could be real */
+			else if(!strncmp((char*)&cmd_buf[5],"LAPOPT",6)) /* AT+CWLAPOPT */
+				cu_esp_at_cwlapopt(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[5],"LAP",3)) /* AT+CWLAP */
 				cu_esp_at_cwlap(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"SAP",3)) /* Set wifi logon credentials for the HOSTED ap */
+			else if(!strncmp((char*)&cmd_buf[5],"LIF\r\n",5)) /* AT+CWLIF */
+				cu_esp_at_cwlif(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[5],"SAP",3)) /* AT+CWSAP */
 				cu_esp_at_cwsap(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"JAP",3)) /* This will always pass */
+			else if (!strncmp((char*)&cmd_buf[5],"JAP",3)) /* AT+CWJAP */
 				cu_esp_at_cwjap(cmd_buf);
-			else if (!strncmp((char*)&cmd_buf[5],"MODE",4)) /* We are not emulating AP mode, but our OS is */
+			else if (!strncmp((char*)&cmd_buf[5],"MODE",4)) /* AT+CWMODE */
 				cu_esp_at_cwmode(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"DHCPS",5)) /* AT+CWDHCPS*/
+				cu_esp_at_cwlapopt(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"DHCP",4)) /* AT+CWDHCP */
+				cu_esp_at_cwdhcp(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"AUTOCONN=",9)) /* AT+CWAUTOCONN*/
+				cu_esp_at_cwautoconn(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"STARTSMART",10)) /* AT+CWSTARTSMART */
+				cu_esp_at_cwstartsmart(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"STOPSMART",9)) /* AT+CWSTOPSMART */
+				cu_esp_at_cwstopsmart(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"STARTDISCOVER",13)) /* AT+CWSTARTDISCOVER */
+				cu_esp_at_cwstartdiscover(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"STOPDISCOVER",12)) /* AT+CWSTOPDISCOVER */
+				cu_esp_at_cwstopdiscover(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"HOSTNAME",8)) /* AT+CWHOSTNAME */
+				cu_esp_at_cwhostname(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"COUNTRY",7)) /* AT+CWCOUNTRY */
+				cu_esp_at_cwlapopt(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"STARTDISCOVER",13)) /* AT_CWSTARTDISCOVER */
+				cu_esp_at_cwstartdiscover(cmd_buf);
+			else if(!strncmp((char*)&cmd_buf[5],"STOPDISCOVER\r\n",14)) /* AT_CWSTOPDISCOVER */
+				cu_esp_at_cwstopdiscover(cmd_buf);
 			else
 				cu_esp_at_bad_command();
-
-		}
+		}else
+			cu_esp_at_bad_command();
 	
-	}else{ /* !"C.." */
+	}else{ /* "AT+.." !"AT+C.." */
+		if(cmd_buf[3] == 'S'){ /* AT+S.. */ 
 
-		if (!strncmp((char*)&cmd_buf[3],"GMR\r\n",5)) /* Get firmware version, no arguments possible */
-			cu_esp_at_gmr();
-		else if (!strncmp((char*)&cmd_buf[3],"IPR=",4)) /* Change baud rate(depreciated) */
-			cu_esp_at_ipr(cmd_buf);
-		else if (!strncmp((char*)&cmd_buf[3],"UART",4)) /* Change baud rate(depreciated?) */
-			cu_esp_at_uart(cmd_buf);
-		else if (!strncmp((char*)&cmd_buf[3],"GSLP=",5)) /* Go to deep sleep(milliseconds) */
-			cu_esp_at_gslp(cmd_buf);
-		else if (!strncmp((char*)&cmd_buf[3],"RST\r\n",5)) /* Reset module, no arguments allowed */
-			cu_esp_at_rst(cmd_buf);
-		else{ /* If we get here, we did receive an "AT+" and the ending "\r\n", but the command doesn't fit anything */
-			cu_esp_at_bad_command(); /* literally says:"this no fun.." */
+			if(cmd_buf[4] == 'Y'){ /* AT+SY.. */
+
+				if (!strncmp((char*)&cmd_buf[5],"SRAM?\r\n",7)) /* AT+SYSRAM */
+					cu_esp_at_sysram(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"SADC",4)) /* AT+SYSADC */
+					cu_esp_at_sysadc(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"SIOSETCFG",9)) /* AT+SYSIOSETCFG */
+					cu_esp_at_sysiosetcfg(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"SIOGETCFG",9)) /* AT+SYSIOGETCFG */
+					cu_esp_at_sysiogetcfg(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"SGPIODIR",8)) /* AT+SYSGPIODIR */
+					cu_esp_at_sysgpiodir(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"SGPIOWRITE",10)) /* AT+SYSGPIOWRITE */
+					cu_esp_at_sysgpiowrite(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"SGPIOREAD",9)) /* AT+SYSGPIOREAD */
+					cu_esp_at_sysgpioread(cmd_buf);
+				else if (!strncmp((char*)&cmd_buf[5],"SMSG",4)) /* AT+SYSMSG? or AT+SYSMSG_CUR or AT+SYSMSG_DEF */
+					cu_esp_at_sysmsg(cmd_buf);
+				else
+					cu_esp_at_bad_command();
+			}else{ /* "AT+S.." !"AT+SY.." */
+				if(!strncmp((char*)&cmd_buf[4],"LEEP",4)) /* AT+SLEEP */
+					cu_esp_at_sleep(cmd_buf);
+				else if(!strncmp((char*)&cmd_buf[4],"AVETRANSLINK=",13)) /* AT+SAVETRANSLINK */
+					cu_esp_at_savetranslink(cmd_buf);
+				else
+					cu_esp_at_bad_command();
+			}
+		}else{ /* "AT+.." !"AT+S.." */
+			if (!strncmp((char*)&cmd_buf[3],"GMR\r\n",5)) /* Get firmware version, no arguments possible */
+				cu_esp_at_gmr();
+			else if (!strncmp((char*)&cmd_buf[3],"IPR=",4)) /* Change baud rate(depreciated?) */
+				cu_esp_at_ipr(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"UART",4)) /* Change baud rate(depreciated?) */
+				cu_esp_at_uart(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"GSLP=",5)) /* Go to deep sleep(milliseconds) */
+				cu_esp_at_gslp(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"RST\r\n",5)) /* Reset module, no arguments allowed */
+				cu_esp_at_rst(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"WAKEUPGPIO=",11)) /* */
+				cu_esp_at_wakeupgpio(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"RFPOWER=",8)) /* */
+				cu_esp_at_rfpower(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"RFVDD",5)) /* */
+				cu_esp_at_rfvdd(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"WPS=",4)) /* */
+				cu_esp_at_wps(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"MDNS=",5)) /* */
+				cu_esp_at_mdns(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"PING=",5)) /* */
+				cu_esp_at_ping(cmd_buf);
+			else if (!strncmp((char*)&cmd_buf[3],"HOSTSERIAL\r\n",12)){ /* Emulator only, use host serial port */
+			
+			}else if(!strncmp((char*)&cmd_buf[3],"RESTORE\r\n",9)){ /* UART Restore */
+				cu_esp_at_restore(cmd_buf);
+			}else{ /* If we get here, we did receive an "AT+" and the ending "\r\n", but the command doesn't fit anything */
+				cu_esp_at_bad_command(); /* literally says:"this no fun.." */
+			}
 		}
 	}
 }
@@ -1913,6 +2386,7 @@ void cu_esp_reset_factory(){
 	esp_state.baud_rate=9600UL;
 	esp_state.uart_logging = 0;
 	esp_state.emulation_model = 3;
+	esp_state.sleep_mode = 2;
 
 	memset(esp_state.soft_ap_name,'\0',sizeof(esp_state.soft_ap_name));
 	sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
@@ -1993,7 +2467,13 @@ void cu_esp_save_config(){
 	fprintf(f, "BluetoothIp=\"%s\"\n", esp_state.bluetooth_ip); /* 0.0.0.0 = DHCP */
 	fprintf(f, "UzenetPass=\"%s\"\n", esp_state.uzenet_pass);
 	fprintf(f, "Baud=\"%d\"\n", esp_state.baud_rate);
-
+	fprintf(f, "SntpEnabled=\"%d\"\n", esp_state.sntp_enabled);
+	fprintf(f, "SntpTimeZone=\"%d\"\n", esp_state.sntp_timezone);
+	fprintf(f, "SntpServer0=\"%s\"\n", esp_state.sntp_server[0]);
+	fprintf(f, "SntpServer1=\"%s\"\n", esp_state.sntp_server[1]);
+	fprintf(f, "SntpServer2=\"%s\"\n", esp_state.sntp_server[2]);
+	fprintf(f, "SleepMode=\"%d\"\n", esp_state.sleep_mode);
+	
 	fprintf(f, "\n#Uart Logging Debug(0 = off, 1 = binary file, 2 = Host Serial)\n");
 	fprintf(f, "UartLogging=\"%d\"\n", esp_state.uart_logging);
 	fprintf(f, "UartLoggingFile=\"%s\"\n", esp_state.uart_logging_fname);
@@ -2078,6 +2558,18 @@ auint cu_esp_load_config(){
 			continue;
 		}else if(sscanf(buf, " Baud = \"%u\" ", &esp_state.baud_rate)){
 			continue;
+		}else if(sscanf(buf, " SleepMode = \"%d\" ", &esp_state.sleep_mode)){
+			continue;
+		}else if(sscanf(buf, " SntpEnabled = \"%u\" ", &esp_state.sntp_enabled)){
+			continue;
+		}else if(sscanf(buf, " SntpTimezone = \"%d\" ", &esp_state.sntp_timezone)){
+			continue;
+		}else if(sscanf(buf, " SntpServer0 = \"%[^\"]\" ", esp_state.sntp_server[0])){
+			continue;
+		}else if(sscanf(buf, " SntpServer1 = \"%[^\"]\" ", esp_state.sntp_server[1])){
+			continue;
+		}else if(sscanf(buf, " SntpServer2 = \"%[^\"]\" ", esp_state.sntp_server[2])){
+			continue;
 		}else if(sscanf(buf, " HostSerialBypass = \"%u\" ", &esp_state.host_serial_bypass)){
 			continue;
 		}else if(sscanf(buf, " HostSerialDevice = \"%[^\"]\" ", tmp)){ /* get the name of a hardware serial device on the host machine(OS dependent) */
@@ -2098,6 +2590,17 @@ auint cu_esp_load_config(){
 	esp_state.baud_rate=9600UL;
 	esp_state.uart_logging = 3;
 //	esp_state.emulation_model = 3;
+
+	esp_state.sntp_enabled = 1;
+	if(strlen((char *)esp_state.sntp_server[0]) < 1)
+		sprintf((char *)esp_state.sntp_server[0],"%s",default_sntp_server0);
+		
+	if(strlen((char *)esp_state.sntp_server[1]) < 1)
+		sprintf((char *)esp_state.sntp_server[1],"%s",default_sntp_server1);
+		
+	if(strlen((char *)esp_state.sntp_server[2]) < 1)
+		sprintf((char *)esp_state.sntp_server[2],"%s",default_sntp_server2);
+
 
 	if(strlen((char *)esp_state.soft_ap_name) < 1)
 		sprintf((char *)esp_state.soft_ap_name,"CUzeBox SoftAP");
@@ -2172,6 +2675,11 @@ auint cu_esp_load_config(){
 	print_message("\tBluetoothMac[%s]\n", esp_state.bluetooth_mac);
 	print_message("\tBluetoothIp[%s]\n", esp_state.bluetooth_ip);
 	print_message("\tBaud[%d]\n", esp_state.baud_rate);
+	print_message("\tSntpEnabled[%d]\n", esp_state.sntp_enabled);
+	print_message("\tSntpTimezone[%d]\n", esp_state.sntp_timezone);
+	print_message("\tSntpServer0[%s]\n", esp_state.sntp_server[0]);
+	print_message("\tSntpServer1[%s]\n", esp_state.sntp_server[1]);
+	print_message("\tSntpServer2[%s]\n", esp_state.sntp_server[2]);
 	print_message("\tUartLogging[%d]\n", esp_state.uart_logging);
 	print_message("\tUartLoggingFile[%s]\n", esp_state.uart_logging_fname);
 	print_message("\tUartPlayback[%d]\n", esp_state.uart_playback);
