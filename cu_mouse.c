@@ -28,6 +28,11 @@
 
 #include "cu_mouse.h"
 
+uint8 cu_mouse_enabled;
+sint32 cu_mouse_dx, cu_mouse_dy;
+uint8 cu_mouse_buttons;
+uint8 cu_mouse_scale;
+
 void cu_adjust_mouse_scale(){ /* TODO replace the implementation in main.c, */
 /* TODO have keyboard ctrl+alt+m toggle mouse sensitivity */
      cu_mouse_scale++;
