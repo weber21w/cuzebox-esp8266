@@ -55,7 +55,7 @@
 
 
 
-
+#define ESP_GPIO_PIN_COUNT	17	//not all are usable...
 
 #define ESP_AP_CONNECTED		1	//connected to wifi so AT+CIPSEND is valid
 #define ESP_AWAITING_SEND		2	//
@@ -64,13 +64,14 @@
 #define ESP_MUX				32	//multiple connections mode is active(changes some syntax and adds restrictions)
 #define ESP_ECHO			64	//echo back received UART data
 #define ESP_PROTO_TCP			128	//standard TCP protocol
-#define ESP_PROTO_UDP			256	//standard UDP protocol
-#define ESP_ALL_CONNECTIONS	512	//
-#define ESP_INTERNET_ACCESS	1024	//not used?
-#define ESP_LIST_APS			2048	//currently waiting to spit out simulated AP list
-#define ESP_CIPDINFO			4096 //show ip and port information with +IPD messages
-#define ESP_SMARTCONFIG_ACTIVE	4096*2
-#define ESP_AUTOCONNECT		4096*2*2
+#define ESP_PROTO_SSL			256	//encrypted TCP protocol
+#define ESP_PROTO_UDP			512	//standard UDP protocol
+#define ESP_ALL_CONNECTIONS	1024	//
+#define ESP_INTERNET_ACCESS	2048	//not used?
+#define ESP_LIST_APS			4096	//currently waiting to spit out simulated AP list
+#define ESP_CIPDINFO			4096*2 //show ip and port information with +IPD messages
+#define ESP_SMARTCONFIG_ACTIVE	4096*4
+#define ESP_AUTOCONNECT		4096*8
 
 #define ESP_AS_AP			1	//softAP only mode(cannot be connected to wifi, some restrictions)
 #define ESP_AS_STA			2	//station only mode(cannot be softAP)
@@ -82,6 +83,10 @@
 #define ESP_USER_MODE_SEND		1 /* send mode, user species the number of bytes and we wait until they are all received to send */
 #define ESP_USER_MODE_UNVARNISHED	2 /* user writes as much as they want during the fixed time period, and it is then sent to the network */
 #define ESP_USER_MODE_PASSTHROUGH	3 /* UART data is passed onto a physical UART devices connected to the host machine running the emulator */
+
+#define ESP_WIFI_MODE_STATION		1
+#define ESP_WIFI_MODE_SOFTAP		2
+#define ESP_WIFI_MODE_SOFTAP_STATION	3
 
 #define ESP_FACTORY_DEFAULT_BAUD_BITS	30//92///185 /* 9600 */
 #define ESP_FACTORY_BAUD_RATE		9600
@@ -117,6 +122,7 @@
 #define	ESP_AT_IP_DELAY			100UL*ESP_AT_MS_DELAY
 #define	ESP_UNVARNISHED_DELAY			20UL*ESP_AT_MS_DELAY*3//HACK why 3x?
 #define	ESP_AT_RST_DELAY			ESP_AT_OK_DELAY
+#define ESP_SNTP_NET_DELAY			40UL*ESP_AT_MS_DELAY
 
 #define ESP_SOCKET_ERROR		-1
 #define ESP_INVALID_SOCKET		-1
@@ -132,7 +138,7 @@
 
 //max string length is 128 for version info, according to firmware source code
 const char *start_up_string = "ets Mar 12 2023,rst cause 4, boot mode(3,7)\r\n\nwdt reset\r\nload 0x401000000,len 24444,room 16\r\nchksum 0xe0 ho 0 tail 12 room 4\r\nready\r\n";
-const char *at_gmr_string = "AT Version:CUzeBox ESP8266 AT Driver 1.7\r\nSDK version: ESP8266 SDK 1.2.0\r\nuzebox.org\r\nBuild:1.0\r\nOK\r\n";
+const char *at_gmr_string = "AT Version:CUzeBox ESP8266 AT Driver 1.7\r\nSDK version: ESP8266 SDK 1.2.0\r\nuzebox.org\r\nBuild:1.0\r\n";
 
 
 const char *fake_ap_name[] = {
@@ -147,8 +153,12 @@ const char *fake_ap_name[] = {
 "NetGear009",
 };
 
-
 #define ESP_NUM_FAKE_APS	9
+
+const char *default_sntp_server0 = "cn.ntp.org.cn";
+const char *default_sntp_server1 = "ntp.sjtu.edu.cn";
+const char *default_sntp_server2 = "us.pool.ntp.org";
+#define ESP_DEFAULT_TIMEZONE	8
 
 const char *ESP_OK_STR  = "OK\r\n";
 const char *ESP8266_CORE_VERSION = "v0.3";
@@ -251,7 +261,7 @@ typedef struct{
 #if defined(WIN32) || defined(_WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
 	auint		winsock_enabled;
 #endif
-	uint32		uart_at_mode;//waiting for an AT command, waiting for bytes for an AT+CIPSEND, or waiting some milliseconds to send packet for AT+CIPSENDEX?
+	//uint32		uart_at_mode;//waiting for an AT command, waiting for bytes for an AT+CIPSEND, or waiting some milliseconds to send packet for AT+CIPSENDEX?
 	uint32		uart_at_state;//0 = AT, 1 = binary mode
 	uint8 		baud_bits0,baud_bits1;
 
@@ -276,6 +286,9 @@ typedef struct{
 	sint8		wifi_pass[64];
 	sint8		wifi_mac[32];
 	sint8		wifi_ip[24];
+	uint8		wifi_mode;//1: Station, 2: SoftAP, 3: SoftAP+Station
+	uint8		wifi_enc;//0: open, 2:WPA_PSK, 3:WPA2_PSK, 4:WPA_WPA2_PSK
+	uint8		wps;
 
 	sint8		ethernet_mac[32];
 	sint8		ethernet_ip[24];
@@ -299,6 +312,24 @@ typedef struct{
 
 	sint8		uzenet_pass[16];
 
+	uint32		sntp_enabled;
+	sint32		sntp_timezone;//-11 to 13		
+	sint8		sntp_server[3][48];
+	sint8		sntp_lasttime[3][64];//last returned time string
+
+	uint8		sysmsg_flags;
+	sint32		sleep_mode;//0: disable, 1: light, 2: modem, default 2
+	uint16		adc;//0-1024(what this means depends on physical voltage divider connected)
+
+	uint8		gpio_mode[ESP_GPIO_PIN_COUNT];//for some reason, 3 is GPIO mode?
+	uint8		gpio_pullup[ESP_GPIO_PIN_COUNT];
+	uint8		gpio_dir[ESP_GPIO_PIN_COUNT];
+	uint8		gpio_level[ESP_GPIO_PIN_COUNT];
+
+	uint8		wechat_enable;
+	sint8		wechat_number[32];//between 6 and 20 characters
+	uint32		wechat_type;//?
+	uint32		wechat_time;//amount of seconds to send packets to be deteced by WeChat devices on LAN?? 0-24x3600, 0 = don't send packets(but does repsond to queries?)		
 }cu_state_esp_t;
 
 
@@ -383,54 +414,70 @@ void cu_esp_at_at();
 void cu_esp_at_ate(sint8 *cmd_buf);
 void cu_esp_at_rst();
 void cu_esp_at_gmr();
+void cu_esp_at_ipr(sint8 *cmd_buf);
 void cu_esp_at_gslp(sint8 *cmd_buf);
+void cu_esp_at_wps(sint8 *cmd_buf);
+void cu_esp_at_rfpower(sint8 *cmd_buf);
+void cu_esp_at_rfvdd(sint8 *cmd_buf);
+void cu_esp_at_wakeupgpio(sint8 *cmd_buf);
+void cu_esp_at_mdns(sint8 *cmd_buf);
+void cu_esp_at_savetranslink(sint8 *cmd_buf);
 
-	
 void cu_esp_at_ciobaud(sint8 *cmd_buf);
+void cu_esp_at_cifsr(sint8 *cmd_buf);
+void cu_esp_at_ciupdate(sint8 *cmd_buf);
+
 void cu_esp_at_cwmode(sint8 *cmd_buf);
 void cu_esp_at_cwjap(sint8 *cmd_buf);
 void cu_esp_at_cwlap(sint8 *cmd_buf);
+void cu_esp_at_cwlapopt(sint8 *cmd_buf);
 void cu_esp_at_cwqap(sint8 *cmd_buf);
 void cu_esp_at_cwsap(sint8 *cmd_buf);
 void cu_esp_at_cwlif(sint8 *cmd_buf);
 void cu_esp_at_cwdhcp(sint8 *cmd_buf);
+void cu_esp_at_cwdhcps(sint8 *cmd_buf);
+void cu_esp_at_cwhostname(sint8 *cmd_buf);
+void cu_esp_at_cwstartdiscover(sint8 *cmd_buf);
+void cu_esp_at_cwstopdiscover(sint8 *cmd_buf);
+
 void cu_esp_at_cipstamac(sint8 *cmd_buf);
 void cu_esp_at_cipapmac(sint8 *cmd_buf);
 void cu_esp_at_cipsta(sint8 *cmd_buf);
 void cu_esp_at_cipap(sint8 *cmd_buf);
-	
 void cu_esp_at_cipstatus(sint8 *cmd_buf);
 void cu_esp_at_cipstart(sint8 *cmd_buf);
 void cu_esp_at_cipsend(sint8 *cmd_buf);
 void cu_esp_at_cipclose(sint8 *cmd_buf);
-void cu_esp_at_cifsr(sint8 *cmd_buf);
 void cu_esp_at_cipmux(sint8 *cmd_buf);
 void cu_esp_at_cipserver(sint8 *cmd_buf);
 void cu_esp_at_cipmode(sint8 *cmd_buf);
 void cu_esp_at_cipsto(sint8 *cmd_buf);
-void cu_esp_at_ciupdate(sint8 *cmd_buf);
-void cu_esp_at_ipr(sint8 *cmd_buf);
-
-void cu_esp_at_uart(sint8 *cmd_buf);
-void cu_esp_at_uart_cur(sint8 *cmd_buf);
-void cu_esp_at_rfpower(sint8 *cmd_buf);
-void cu_esp_at_rfvdd(sint8 *cmd_buf);
-void cu_esp_at_restore(sint8 *cmd_buf);
+void cu_esp_at_cipsslconf(sint8 *cmd_buf);
+void cu_esp_at_cipsslsize(sint8 *cmd_buf);
+void cu_esp_at_cipservermaxconn(sint8 *cmd_buf);
 void cu_esp_at_cipdinfo(sint8 *cmd_buf);
-void cu_esp_at_ping(sint8 *cmd_buf);
-void cu_esp_at_cwautoconn(sint8 *cmd_buf);
-void cu_esp_at_savetranslink(sint8 *cmd_buf);
 void cu_esp_at_cipbufreset(sint8 *cmd_buf);
 void cu_esp_at_cipcheckseq(sint8 *cmd_buf);
 void cu_esp_at_cipbufstatus(sint8 *cmd_buf);
 void cu_esp_at_cipsendbuf(sint8 *cmd_buf);
-void cu_esp_at_sendex(sint8 *cmd_buf);
+void cu_esp_at_cipsendex(sint8 *cmd_buf);
+void cu_esp_at_ciprecvmode(sint8 *cmd_buf);
+void cu_esp_at_ciprecvlen(sint8 *cmd_buf);
+void cu_esp_at_ciprecvdata(sint8 *cmd_buf);
+void cu_esp_at_cipsntptime(sint8 *cmd_buf);
+void cu_esp_at_cipsntpcfg(sint8 *cmd_buf);
+void cu_esp_at_cipdomain(sint8 *cmd_buf);
+
+void cu_esp_at_uart(sint8 *cmd_buf);
+void cu_esp_at_uart_cur(sint8 *cmd_buf);
+void cu_esp_at_restore(sint8 *cmd_buf);
+void cu_esp_at_ping(sint8 *cmd_buf);
+void cu_esp_at_cwautoconn(sint8 *cmd_buf);
 void cu_esp_at_cwstartsmart(sint8 *cmd_buf);
 void cu_esp_at_cwstopsmart(sint8 *cmd_buf);
 	
 void cu_esp_at_bad_command();
 void cu_esp_at_debug(sint8 *cmd_buf);
-
 
 void cu_esp_reset_factory();
 void cu_esp_save_translink();
@@ -452,4 +499,12 @@ void cu_esp_host_serial_write(uint8 c);
 uint8 cu_esp_host_serial_read();
 auint cu_esp_host_serial_rx_bytes_ready();
 auint cu_esp_get_time_seconds();
+
+void cu_esp_at_sysmsg(sint8 *cmd_buf);
+void cu_esp_at_sysadc(sint8 *cmd_buf);
+void cu_esp_at_sysram(sint8 *cmd_buf);
+void cu_esp_sysgpiowrite(sint8 *cmd_buf);
+void cu_esp_sysgpioread(sint8 *cmd_buf);
+void cu_esp_sysiogetcfg(sint8 *cmd_buf);
+void cu_esp_sysiosetcfg(sint8 *cmd_buf);
 #endif
