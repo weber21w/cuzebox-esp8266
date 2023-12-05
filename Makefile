@@ -37,7 +37,7 @@
 
 include Make_defines.mk
 
-CFLAGS  +=
+CFLAGS  += -flto=auto
 
 OBJECTS  = $(OBD)/main.o
 OBJECTS += $(OBD)/cu_ufile.o
