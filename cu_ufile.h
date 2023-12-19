@@ -51,7 +51,8 @@ typedef struct{
  uint8 psupport;    /* Peripherals supported */
  uint8 desc[64];    /* Description (Zero terminated) */
  uint8 pdefault;    /* Peripherals default on(Emulator) */
- /* uint8 reserved[113] */
+ uint8 jamma;       /* JAMMA Options(Rotation/Mirroring) */
+ /* uint8 reserved[112] */
 }cu_ufile_header_t;
 
 
