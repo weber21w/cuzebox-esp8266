@@ -100,12 +100,15 @@ Currently the following features are implemented:
 - SPM instruction and related elements necessary for bootloader emulation.
 - SD Card read and write (writing didn't see much testing yet).
 - SPI RAM.
-
+- UART(partial, including host serial devices)
+- ESP8266(partial).
+- Keyboard.
+- JAMMA.
+- 
 Currently lacking but planned:
 
 - Emulator state saves (snapshots).
 - Mouse (Uzebox's SNES mouse).
-- Networking features as provided by the ESP8266 over the UART.
 
 Notes:
 
@@ -141,6 +144,12 @@ and the emulated keyboard dongle will always use P2. This will bypass the gamepa
 for that port. You can disable either peripheral and it will automatically allow
 gamepad data again for the corresponding port.
 
+JAMMA ROMs that use rotated displays can be simulated. The proper bits in the .uze
+file must be set for this to take place, as there is currently no manual option to
+set this in game.
+
+The ESP8266 emulation can be configured with the esp.cfg file. Several options are
+available that will be documented later...
 
 Emscripten notes
 ------------------------------------------------------------------------------
