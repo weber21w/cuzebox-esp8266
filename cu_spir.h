@@ -34,7 +34,7 @@
 
 #include "types.h"
 
-#define MAX_SPI_RAM_SIZE 512UL*1024UL
+#define MAX_SPI_RAM_SIZE 4UL*128UL*1024UL /* modeling 23AA04M */
 
 /* SPI RAM state structure. This isn't really meant to be edited, but it is
 ** necessary for emulator state dumps. Every value is at most 32 bits. */
@@ -46,7 +46,9 @@ typedef struct{
  auint addr;     /* Address within the RAM */
  auint data;     /* Data waiting to get on the output (8 bits) */
  auint size;     /* 128K for 23LC1024, or 256K/512K/? for 23AA0XM */
- auint page_size; /* Always 32 for 23LC1024, configurable 32/256 for 23AA0XM */
+ auint addr_mask; /* mask for address range calculations(size-1) */
+ auint page_size; /* default 32, configurable to 256 on 23AA0XM */
+ auint page_mask; /* page calculations(32 for 23LC1024, configurable 256 for 23AA0XM */
 }cu_state_spir_t;
 
 
@@ -96,4 +98,6 @@ void  cu_spir_update(void);
 ** Dump SPI RAM state to file for debugging.
 */
 void  cu_spir_dump(void);
+
+
 #endif
