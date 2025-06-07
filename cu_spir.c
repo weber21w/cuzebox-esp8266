@@ -70,7 +70,9 @@ void  cu_spir_reset(auint cycle)
  spir_state.data = 0xFFU;
  spir_state.state = STAT_IDLE;
  spir_state.size = MAX_SPI_RAM_SIZE;
- spir_state.page_size = 0x1FU;
+ spir_state.addr_mask = MAX_SPI_RAM_SIZE-1; /* address rollover calculations */
+ spir_state.page_size = 32; /* default for all chip types */
+ spir_state.page_mask = 32-1;
 }
 
 
@@ -103,14 +105,13 @@ void  cu_spir_send(auint data, auint cycle)
  ** generating video data. */
 
  if (spir_state.state == STAT_READB){
-
   if (spir_state.mode == 0x40U){ /* Sequential mode */
    spir_state.addr ++;
   }else if       (spir_state.mode == 0x80U){ /* Page mode */
-   spir_state.addr = (spir_state.addr & (spir_state.size - spir_state.page_size)) +
-                     ((spir_state.addr + 1U) & spir_state.page_size);
+   spir_state.addr = (spir_state.addr & (MAX_SPI_RAM_SIZE - spir_state.page_size)) +
+                     ((spir_state.addr + 1U) & (spir_state.page_mask));
   }else{}
-  spir_state.data  = spir_state.ram[spir_state.addr & spir_state.size];
+  spir_state.data  = spir_state.ram[spir_state.addr & spir_state.addr_mask];
 
   return;
  }
@@ -122,6 +123,29 @@ void  cu_spir_send(auint data, auint cycle)
  if (spir_state.ena){     /* Good, this only tampers with the bus if actually enabled (unlike the SD card...) */
 
   switch (spir_state.state & (~STAT_PPMASK)){
+
+   case STAT_READ:        /* Read (preparation) */
+
+    ppos = (spir_state.state & STAT_PPMASK) >> STAT_PPSH;
+    spir_state.addr |= data << ((2U - ppos) * 8U);
+    ppos ++;
+    spir_state.state = STAT_READ | (ppos << STAT_PPSH);
+    if (ppos == 3U){
+     spir_state.state = STAT_READB;
+     spir_state.data  = spir_state.ram[spir_state.addr & spir_state.addr_mask]; /* First data byte */
+    }
+    break;
+
+   case STAT_WRITE:       /* Write (preparation) */
+
+    ppos = (spir_state.state & STAT_PPMASK) >> STAT_PPSH;
+    spir_state.addr |= data << ((2U - ppos) * 8U);
+    ppos ++;
+    spir_state.state = STAT_WRITE | (ppos << STAT_PPSH);
+    if (ppos == 3U){
+     spir_state.state = STAT_WRITEB;
+    }
+    break;
 
    case STAT_IDLE:        /* Wait for valid command byte */
 
@@ -147,35 +171,12 @@ void  cu_spir_send(auint data, auint cycle)
     }
     break;
 
-   case STAT_READ:        /* Read (preparation) */
-
-    ppos = (spir_state.state & STAT_PPMASK) >> STAT_PPSH;
-    spir_state.addr |= data << ((2U - ppos) * 8U);
-    ppos ++;
-    spir_state.state = STAT_READ | (ppos << STAT_PPSH);
-    if (ppos == 3U){
-     spir_state.state = STAT_READB;
-     spir_state.data  = spir_state.ram[spir_state.addr & spir_state.size]; /* First data byte */
-    }
-    break;
-
-   case STAT_WRITE:       /* Write (preparation) */
-
-    ppos = (spir_state.state & STAT_PPMASK) >> STAT_PPSH;
-    spir_state.addr |= data << ((2U - ppos) * 8U);
-    ppos ++;
-    spir_state.state = STAT_WRITE | (ppos << STAT_PPSH);
-    if (ppos == 3U){
-     spir_state.state = STAT_WRITEB;
-    }
-    break;
-
    case STAT_WRITEB:      /* Write (data bytes) */
 
-    spir_state.ram[spir_state.addr & spir_state.size] = data;
+    spir_state.ram[spir_state.addr & spir_state.addr_mask] = data;
     if       (spir_state.mode == 0x80U){ /* Page mode */
-     spir_state.addr = (spir_state.addr & (spir_state.size - spir_state.page_size)) +
-                       ((spir_state.addr + 1U) & 0x1FU);
+     spir_state.addr = (spir_state.addr & (MAX_SPI_RAM_SIZE - spir_state.page_size)) +
+                       ((spir_state.addr + 1U) & (spir_state.page_mask));
     }else if (spir_state.mode == 0x40U){ /* Sequential mode */
      spir_state.addr ++;
     }else{}
