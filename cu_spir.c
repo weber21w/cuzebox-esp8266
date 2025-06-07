@@ -69,6 +69,8 @@ void  cu_spir_reset(auint cycle)
  spir_state.mode = 0x40U; /* Sequential mode */
  spir_state.data = 0xFFU;
  spir_state.state = STAT_IDLE;
+ spir_state.size = MAX_SPI_RAM_SIZE;
+ spir_state.page_size = 0x1FU;
 }
 
 
@@ -102,13 +104,13 @@ void  cu_spir_send(auint data, auint cycle)
 
  if (spir_state.state == STAT_READB){
 
-  if       (spir_state.mode == 0x80U){ /* Page mode */
-   spir_state.addr = (spir_state.addr & 0x1FFE0U) +
-                     ((spir_state.addr + 1U) & 0x1FU);
-  }else if (spir_state.mode == 0x40U){ /* Sequential mode */
+  if (spir_state.mode == 0x40U){ /* Sequential mode */
    spir_state.addr ++;
+  }else if       (spir_state.mode == 0x80U){ /* Page mode */
+   spir_state.addr = (spir_state.addr & (spir_state.size - spir_state.page_size)) +
+                     ((spir_state.addr + 1U) & spir_state.page_size);
   }else{}
-  spir_state.data  = spir_state.ram[spir_state.addr & 0x1FFFFU];
+  spir_state.data  = spir_state.ram[spir_state.addr & spir_state.size];
 
   return;
  }
@@ -124,16 +126,16 @@ void  cu_spir_send(auint data, auint cycle)
    case STAT_IDLE:        /* Wait for valid command byte */
 
     switch (data){
-     case 0x01U:          /* Write mode register */
-      spir_state.state = STAT_WMODE;
+     case 0x03U:          /* Read data */
+      spir_state.state = STAT_READ;
+      spir_state.addr  = 0U;
       break;
      case 0x02U:          /* Write data */
       spir_state.state = STAT_WRITE;
       spir_state.addr  = 0U;
       break;
-     case 0x03U:          /* Read data */
-      spir_state.state = STAT_READ;
-      spir_state.addr  = 0U;
+     case 0x01U:          /* Write mode register */
+      spir_state.state = STAT_WMODE;
       break;
      case 0x05U:          /* Read mode register */
       spir_state.state = STAT_RMODE;
@@ -153,7 +155,7 @@ void  cu_spir_send(auint data, auint cycle)
     spir_state.state = STAT_READ | (ppos << STAT_PPSH);
     if (ppos == 3U){
      spir_state.state = STAT_READB;
-     spir_state.data  = spir_state.ram[spir_state.addr & 0x1FFFFU]; /* First data byte */
+     spir_state.data  = spir_state.ram[spir_state.addr & spir_state.size]; /* First data byte */
     }
     break;
 
@@ -170,9 +172,9 @@ void  cu_spir_send(auint data, auint cycle)
 
    case STAT_WRITEB:      /* Write (data bytes) */
 
-    spir_state.ram[spir_state.addr & 0x1FFFFU] = data;
+    spir_state.ram[spir_state.addr & spir_state.size] = data;
     if       (spir_state.mode == 0x80U){ /* Page mode */
-     spir_state.addr = (spir_state.addr & 0x1FFE0U) +
+     spir_state.addr = (spir_state.addr & (spir_state.size - spir_state.page_size)) +
                        ((spir_state.addr + 1U) & 0x1FU);
     }else if (spir_state.mode == 0x40U){ /* Sequential mode */
      spir_state.addr ++;
@@ -230,4 +232,18 @@ cu_state_spir_t* cu_spir_get_state(void)
 */
 void  cu_spir_update(void)
 {
+}
+
+
+
+/*
+** Dump SPI RAM state to file for debugging.
+*/
+void  cu_spir_dump(void)
+{
+ FILE * f = fopen("spir_dump.bin", "wb");
+  if(f != NULL){
+   fwrite(spir_state.ram, 1, sizeof(spir_state.ram), f);
+   fclose(f);
+  }
 }
