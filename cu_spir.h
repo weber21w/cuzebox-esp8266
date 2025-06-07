@@ -34,16 +34,19 @@
 
 #include "types.h"
 
+#define MAX_SPI_RAM_SIZE 512UL*1024UL
 
 /* SPI RAM state structure. This isn't really meant to be edited, but it is
 ** necessary for emulator state dumps. Every value is at most 32 bits. */
 typedef struct{
- uint8 ram[0x20000U];
+ uint8 ram[MAX_SPI_RAM_SIZE];
  boole ena;      /* Chip select state, TRUE: enabled (CS low) */
  auint mode;     /* Mode register's contents (on bit 6 and 7) */
  auint state;    /* SPI RAM state machine */
  auint addr;     /* Address within the RAM */
  auint data;     /* Data waiting to get on the output (8 bits) */
+ auint size;     /* 128K for 23LC1024, or 256K/512K/? for 23AA0XM */
+ auint page_size; /* Always 32 for 23LC1024, configurable 32/256 for 23AA0XM */
 }cu_state_spir_t;
 
 
@@ -89,4 +92,8 @@ cu_state_spir_t* cu_spir_get_state(void);
 void  cu_spir_update(void);
 
 
+/*
+** Dump SPI RAM state to file for debugging.
+*/
+void  cu_spir_dump(void);
 #endif
