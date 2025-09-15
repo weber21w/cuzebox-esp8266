@@ -44,19 +44,7 @@ static const char cu_err[] = "Error: ";
 static const char cu_war[] = "Warning: ";
 #endif
 
-#define PERIPHERAL_MOUSE 1
-#define PERIPHERAL_KEYBOARD 2
-#define PERIPHERAL_MULTITAP 4
-#define PERIPHERAL_ESP8266 8
 
-#define JAMMA_ROTATE_90 1
-#define JAMMA_ROTATE_180 2
-#define JAMMA_ROTATE_270 4
-#define JAMMA_FLIP_H 8
-#define JAMMA_FLIP_V 16
-#define JAMMA_B0 32 //future use...
-#define JAMMA_B1 64
-#define JAMMA_B2 128
 
 /*
 ** Attempts to load the passed file into code memory. The code memory is not
@@ -179,6 +167,9 @@ boole cu_ufile_load(char const* fname, uint8* cmem, cu_ufile_header_t* head)
  }else{
    sprintf((char *)jamma_str+strlen((char *)jamma_str), "Disabled");
  }
+
+ head->spiram_banks = buf[0x199];
+
  rv = filesys_read(FILESYS_CH_EMU, cmem, len);
  if (rv != len){
   print_error("%s%sNot enough data for program in %s.\n", cu_id, cu_err, fname);
@@ -191,18 +182,21 @@ boole cu_ufile_load(char const* fname, uint8* cmem, cu_ufile_header_t* head)
 
  print_message("%sSuccesfully loaded program from %s:\n", cu_id, fname);
  print_message(
-  "\tName .......: %s\n"
-  "\tAuthor .....: %s\n"
-  "\tYear .......: %d\n"
-  "\tDescription : %s\n"
-  "\tSupported ..: %s\n"
-  "\tJAMMA ......: %s\n",
+  "\tName ........: %s\n"
+  "\tAuthor ......: %s\n"
+  "\tYear ........: %u\n"
+  "\tDescription .: %s\n"
+  "\tSupported ...: %s\n"
+  "\tJAMMA .......: %s\n"
+  "\tSPI RAM Banks: %u\n",
   (char*)(&(head->name[0])),
   (char*)(&(head->author[0])),
-  head->year,
+  (unsigned)(head->year),
   (char*)(&(head->desc[0])),
-  (char*)(&(pdisplay_str)),
-  (char*)(&(jamma_str)));
+  (char*)pdisplay_str,
+  (char*)jamma_str,
+  (unsigned)(head->spiram_banks)
+ );
  /* Successful */
 
  return TRUE;

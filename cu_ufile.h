@@ -36,6 +36,22 @@
 
 
 
+#define PERIPHERAL_MOUSE 1
+#define PERIPHERAL_KEYBOARD 2
+#define PERIPHERAL_MULTITAP 4
+#define PERIPHERAL_ESP8266 8
+
+#define JAMMA_ROTATE_90 1
+#define JAMMA_ROTATE_180 2
+#define JAMMA_ROTATE_270 4
+#define JAMMA_FLIP_H 8
+#define JAMMA_FLIP_V 16
+#define JAMMA_B0 32 //future use...
+#define JAMMA_B1 64
+#define JAMMA_B2 128
+
+
+
 /*
 ** UzeRom header provided information
 */
@@ -52,7 +68,8 @@ typedef struct{
  uint8 desc[64];    /* Description (Zero terminated) */
  uint8 pdefault;    /* Peripherals default on(Emulator) */
  uint8 jamma;       /* JAMMA Options(Rotation/Mirroring) */
- /* uint8 reserved[112] */
+ uint8 spiram_banks;/* Ideal SPI RAM size(in 64K banks) */
+ /* uint8 reserved[111] */
 }cu_ufile_header_t;
 
 
