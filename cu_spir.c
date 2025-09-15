@@ -27,9 +27,6 @@
 
 #include "cu_spir.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
 
 /* SPI RAM state */
 static cu_state_spir_t spir_state;
@@ -55,6 +52,8 @@ static cu_state_spir_t spir_state;
 /* Sink (don't accept further data) */
 #define STAT_SINK    0x07U
 
+
+
 /* Helper for power-of-2 clamps (round up, 32-bit is sufficient here) */
 static auint ceil_pow2(auint x)
 {
@@ -69,12 +68,16 @@ static auint ceil_pow2(auint x)
  return x + 1U;
 }
 
+
+
 /* Keep masks in sync (safe if size==0) */
 static void spir_recompute_masks(void)
 {
  spir_state.addr_mask = (spir_state.size ? (spir_state.size - 1U) : 0U);   /* size must be power-of-two */
  spir_state.page_mask = spir_state.page_size - 1U;
 }
+
+
 
 /* Ensure heap capacity for 'need' bytes; zero-fill new tail */
 static boole spir_ensure_capacity(auint need)
@@ -96,6 +99,8 @@ static boole spir_ensure_capacity(auint need)
  spir_state.alloc_bytes = need;
  return TRUE;
 }
+
+
 
 /*
 ** Resets SPI RAM peripheral. Cycle is the CPU cycle when it happens which
@@ -126,6 +131,8 @@ void  cu_spir_reset(auint cycle)
  spir_state.addr_bytes = (spir_state.size && (spir_state.size <= 65536U)) ? 2U : 3U;
 }
 
+
+
 /*
 ** Sets chip select's state, TRUE to enable, FALSE to disable.
 */
@@ -139,6 +146,8 @@ void  cu_spir_cs_set(boole ena, auint cycle)
   }
  }
 }
+
+
 
 /*
 ** Sends a byte of data to the SPI RAM. The passed cycle corresponds the cycle
