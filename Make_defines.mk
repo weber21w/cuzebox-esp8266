@@ -33,7 +33,7 @@
 #
 #
 include Make_config.mk
-CFLAGS=
+CFLAGS=-std=gnu17
 #
 #
 # The compiler
