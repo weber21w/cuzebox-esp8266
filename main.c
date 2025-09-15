@@ -31,6 +31,7 @@
 #include "cu_hfile.h"
 #include "cu_avr.h"
 #include "cu_ctr.h"
+#include "cu_spir.h"
 #include "cu_kbd.h"
 #include "cu_mouse.h"
 #include "filesys.h"
@@ -463,7 +464,6 @@ int main (int argc, char** argv)
  audio_reset();
  textgui_reset();
 
-
  /* Add game info if available */
 
  if (uzefile){
@@ -472,6 +472,17 @@ int main (int argc, char** argv)
   strncpy((char*)(&(tgui->auth[0])), (char const*)(&(ufhead.author[0])), TEXTGUI_STR_MAX);
  }
 
+ /* Apply preferences if available */
+
+ if(!ufhead.spiram_banks)
+  ufhead.spiram_banks = 2; /* default to 128K */
+
+ cu_spir_set_size(ufhead.spiram_banks);
+ cu_spir_reset(0);
+ /* cu_mouse_set_enabled((ufhead.pdefault & PERIPHERAL_MOUSE)?1:0); */
+ /* cu_kbd_set_enabled((ufhead.pdefault & PERIPHERAL_KEYBOARD)?1:0); */
+ /* cu_multitap_set_enabled((ufhead.pdefault & PERIPHERAL_MULTITAP)?1:0); */
+ /* cu_esp_set_enabled((ufhead.pdefault & PERIPHERAL_ESP8266)?1:0); */
 
  main_ptick = SDL_GetTicks() - 16U; /* First frame interval should be normal */
 #ifdef __EMSCRIPTEN__

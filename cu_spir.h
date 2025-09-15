@@ -25,31 +25,38 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
-
 #ifndef CU_SPIR_H
 #define CU_SPIR_H
 
-
-
 #include "types.h"
 
-#define MAX_SPI_RAM_SIZE 4UL*128UL*1024UL /* modeling 23AA04M */
+#ifndef MAX_SPI_RAM_SIZE
+ #define MAX_SPI_RAM_SIZE (4UL*128UL*1024UL) /* modeling 23AA04M */
+#endif
+
+#if (MAX_SPI_RAM_SIZE > 0x01000000U)
+#error "SPI RAM > 16MiB requires 4-byte addressing; widen addr_bytes/PP field"
+#endif
+
+
 
 /* SPI RAM state structure. This isn't really meant to be edited, but it is
 ** necessary for emulator state dumps. Every value is at most 32 bits. */
 typedef struct{
- uint8 ram[MAX_SPI_RAM_SIZE];
- boole ena;      /* Chip select state, TRUE: enabled (CS low) */
- auint mode;     /* Mode register's contents (on bit 6 and 7) */
- auint state;    /* SPI RAM state machine */
- auint addr;     /* Address within the RAM */
- auint data;     /* Data waiting to get on the output (8 bits) */
- auint size;     /* 128K for 23LC1024, or 256K/512K/? for 23AA0XM */
- auint addr_mask; /* mask for address range calculations(size-1) */
- auint page_size; /* default 32, configurable to 256 on 23AA0XM */
- auint page_mask; /* page calculations(32 for 23LC1024, configurable 256 for 23AA0XM */
+ uint8 *ram;        /* heap buffer (size bytes valid) */
+ auint alloc_bytes;/* current heap capacity (>= size) */
+ boole ena;        /* Chip select state, TRUE: enabled (CS low) */
+ auint mode;       /* Mode register's contents (on bit 6 and 7) */
+ auint state;      /* SPI RAM state machine */
+ auint addr;       /* Address within the RAM */
+ auint data;       /* Data waiting to get on the output (8 bits) */
+ auint size;       /* visible size in bytes (power-of-two) */
+ uint8 addr_bytes; /* 3 for 128K/512K parts, 2 for 64K parts */
+ auint addr_mask;  /* mask for address range calculations (size-1) */
+ auint page_size;  /* default 32, configurable to 256 on 23AA0XM */
+ auint page_mask;  /* page calculations (32 for 23LC1024, configurable 256 for 23AA0XM) */
 }cu_state_spir_t;
+
 
 
 /*
@@ -59,10 +66,12 @@ typedef struct{
 void  cu_spir_reset(auint cycle);
 
 
+
 /*
 ** Sets chip select's state, TRUE to enable, FALSE to disable.
 */
 void  cu_spir_cs_set(boole ena, auint cycle);
+
 
 
 /*
@@ -70,6 +79,7 @@ void  cu_spir_cs_set(boole ena, auint cycle);
 ** when it was clocked out of the AVR.
 */
 void  cu_spir_send(auint data, auint cycle);
+
 
 
 /*
@@ -80,11 +90,13 @@ void  cu_spir_send(auint data, auint cycle);
 auint cu_spir_recv(auint cycle);
 
 
+
 /*
 ** Returns SPI RAM state. It may be written, then the cu_spir_update()
 ** function has to be called to rebuild any internal state depending on it.
 */
 cu_state_spir_t* cu_spir_get_state(void);
+
 
 
 /*
@@ -94,10 +106,25 @@ cu_state_spir_t* cu_spir_get_state(void);
 void  cu_spir_update(void);
 
 
+
+/*
+** Set the number of 64K banks (if 1, we assume 2 byte addressing, otherwise 3).
+** Non power-of-two requests are rounded up to the next power of two, then clamped to MAX.
+*/
+void  cu_spir_set_size(auint banks);
+
+
+
 /*
 ** Dump SPI RAM state to file for debugging.
 */
 void  cu_spir_dump(void);
 
+
+
+/*
+** Optional: free heap buffer on program shutdown.
+*/
+void  cu_spir_deinit(void);
 
 #endif
