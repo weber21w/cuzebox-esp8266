@@ -31,7 +31,7 @@
 #include "types.h"
 
 #ifndef MAX_SPI_RAM_SIZE
- #define MAX_SPI_RAM_SIZE (4UL*128UL*1024UL) /* modeling 23AA04M */
+ #define MAX_SPI_RAM_SIZE (128UL*64UL*1024UL) /* hypothetical chip up to 8MB */
 #endif
 
 #if (MAX_SPI_RAM_SIZE > 0x01000000U)
